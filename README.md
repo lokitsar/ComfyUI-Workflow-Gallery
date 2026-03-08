@@ -15,6 +15,14 @@ A custom ComfyUI node that saves generated images and displays them in a scrolla
 - Close the viewer to return to the thumbnail gallery
 - Passes images through unchanged for continued workflow use
 
+## Notes
+
+This node was developed and tested in a local Windows ComfyUI setup.
+
+It is being shared as a useful community tool and may need adjustments for other environments or future ComfyUI frontend changes.
+
+Bug reports are welcome, but I may not be able to provide full support for every setup.
+
 ## Why I made this
 
 I wanted a cleaner way to review multiple generated images inside a workflow without digging through output folders every time.
