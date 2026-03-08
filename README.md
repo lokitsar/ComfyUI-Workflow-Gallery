@@ -44,7 +44,3 @@ Example:
 ComfyUI/
 └── custom_nodes/
     └── ComfyUI-Workflow-Gallery/
-
-## License
-
-MIT
