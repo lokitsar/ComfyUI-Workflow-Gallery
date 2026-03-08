@@ -2,7 +2,7 @@
 
 Workflow Gallery is a custom ComfyUI node that collects images passing through it and displays them inside a scrollable gallery directly on the node.
 
-##What changed with v0.1.8
+## What changed with v0.1.8
   
 - Added on-screen left/right navigation arrows in viewer mode
 - Removed keyboard navigation
