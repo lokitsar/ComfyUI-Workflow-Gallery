@@ -32,10 +32,14 @@ function ensureStyles() {
     .wg-count { margin-left:auto; opacity:0.85; font-size:12px; }
     .wg-preview { flex:1 1 auto; min-height:520px; overflow:hidden; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:8px; background:rgba(0,0,0,0.2); display:flex; flex-direction:column; position:relative; }
     .wg-preview.hidden { display:none; }
-    .wg-preview-img-wrap { flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; overflow:auto; }
-    .wg-preview-img { display:block; max-width:100%; max-height:100%; width:auto; height:auto; margin:0 auto; border-radius:8px; object-fit:contain; }
+    .wg-preview-stage { flex:1 1 auto; min-height:0; display:flex; align-items:stretch; gap:8px; }
+    .wg-preview-lane { flex:0 0 48px; display:flex; align-items:center; justify-content:center; }
+    .wg-preview-img-wrap { flex:1 1 auto; min-width:0; min-height:0; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    .wg-preview-img { display:block; max-width:100%; max-height:100%; width:auto; height:auto; margin:0 auto; border-radius:8px; object-fit:contain; cursor:pointer; }
+    .wg-nav { width:40px; height:88px; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.16); border-radius:10px; background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.95); font-size:28px; line-height:1; cursor:pointer; user-select:none; transition:background 0.12s ease, opacity 0.12s ease; }
+    .wg-nav:hover { background:rgba(255,255,255,0.12); }
+    .wg-nav.hidden { visibility:hidden; pointer-events:none; opacity:0; }
     .wg-preview-caption { padding-top:6px; font-size:11px; line-height:1.25; word-break:break-word; opacity:0.9; text-align:center; }
-    .wg-close { position:absolute; top:8px; right:8px; z-index:2; cursor:pointer; padding:4px 8px; border-radius:6px; }
     .wg-gallery { flex:1 1 auto; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; min-height:180px; }
     .wg-root.viewer-mode .wg-gallery, .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-dir { display:none; }
     .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:620px; }
@@ -67,6 +71,45 @@ function layoutGrid(galleryEl, thumbSize) {
   galleryEl.style.gridTemplateColumns = `repeat(auto-fill, minmax(${size}px, 1fr))`;
 }
 
+function getDisplayEntries(payload) {
+  return payload?.entries?.slice().reverse() || [];
+}
+
+function closeViewer(node) {
+  const state = node.__wgState;
+  if (!state) return;
+  state.selectedId = null;
+  state.root.classList.remove("viewer-mode");
+  state.preview.classList.add("hidden");
+  state.previewImg.removeAttribute("src");
+  state.previewCaption.textContent = "";
+  renderGallery(node, state.payload || { entries: [] });
+  node.setDirtyCanvas(true, true);
+}
+
+function navigateViewer(node, direction) {
+  const state = node.__wgState;
+  if (!state?.selectedId || !state.payload) return;
+  const entries = getDisplayEntries(state.payload);
+  const idx = entries.findIndex((entry) => entry.id === state.selectedId);
+  if (idx === -1 || !entries.length) return;
+  const nextIdx = Math.max(0, Math.min(entries.length - 1, idx + direction));
+  if (nextIdx === idx) return;
+  state.selectedId = entries[nextIdx].id;
+  renderGallery(node, state.payload);
+  node.setDirtyCanvas(true, true);
+}
+
+function updateNavButtons(state, entries) {
+  if (!state?.navLeft || !state?.navRight) return;
+  const idx = entries.findIndex((entry) => entry.id === state.selectedId);
+  const atStart = idx <= 0;
+  const atEnd = idx === -1 || idx >= entries.length - 1;
+  state.navLeft.classList.toggle('hidden', atStart);
+  state.navRight.classList.toggle('hidden', atEnd);
+}
+
+
 function renderGallery(node, payload) {
   const state = node.__wgState;
   if (!state) return;
@@ -88,7 +131,7 @@ function renderGallery(node, payload) {
     return;
   }
 
-  const entries = payload.entries.slice().reverse();
+  const entries = getDisplayEntries(payload);
   const selectedStillExists = entries.some((entry) => entry.id === state.selectedId);
   if (!selectedStillExists) {
     state.selectedId = null;
@@ -133,12 +176,14 @@ ${entry.width}×${entry.height}`]);
       state.previewImg.src = active.full_url;
       state.previewImg.alt = active.filename;
       state.previewCaption.textContent = `${active.filename} • ${active.width}×${active.height}`;
+      updateNavButtons(state, entries);
     }
   } else {
     state.root.classList.remove("viewer-mode");
     state.preview.classList.add("hidden");
     state.previewImg.removeAttribute("src");
     state.previewCaption.textContent = "";
+    updateNavButtons(state, entries);
   }
 }
 
@@ -149,9 +194,11 @@ function attachDom(node) {
   const refreshBtn = el("button", { type: "button" }, ["Refresh"]);
   const count = el("span", { className: "wg-count" }, ["0 / 0"]);
   const previewImg = el("img", { className: "wg-preview-img", loading: "eager", alt: "Selected image preview" });
+  const navLeft = el("button", { type: "button", className: "wg-nav hidden", "aria-label": "Previous image" }, ["‹"]);
+  const navRight = el("button", { type: "button", className: "wg-nav hidden", "aria-label": "Next image" }, ["›"]);
   const previewCaption = el("div", { className: "wg-preview-caption" }, [""]);
-  const closeBtn = el("button", { type: "button", className: "wg-close" }, ["✕"]);
-  const preview = el("div", { className: "wg-preview hidden" }, [closeBtn, el("div", { className: "wg-preview-img-wrap" }, [previewImg]), previewCaption]);
+  const previewStage = el("div", { className: "wg-preview-stage" }, [el("div", { className: "wg-preview-lane wg-preview-lane-left" }, [navLeft]), el("div", { className: "wg-preview-img-wrap" }, [previewImg]), el("div", { className: "wg-preview-lane wg-preview-lane-right" }, [navRight])]);
+  const preview = el("div", { className: "wg-preview hidden" }, [previewStage, previewCaption]);
   const gallery = el("div", { className: "wg-gallery" });
   const thumbSlider = el("input", {
     type: "range",
@@ -162,6 +209,18 @@ function attachDom(node) {
   });
   const dir = el("span", {}, [""]);
 
+  previewImg.addEventListener("click", () => closeViewer(node));
+  navLeft.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigateViewer(node, -1);
+  });
+  navRight.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigateViewer(node, 1);
+  });
+
   const root = el("div", { className: "wg-root" }, [
     el("div", { className: "wg-topbar" }, [clearBtn, refreshBtn, count]),
     preview,
@@ -171,23 +230,13 @@ function attachDom(node) {
   ]);
 
   const dirWrap = root.querySelector('.wg-dir');
-  node.__wgState = { root, clearBtn, refreshBtn, count, preview, previewImg, previewCaption, closeBtn, gallery, thumbSlider, dir, dirWrap, selectedId: null, payload: null };
+  node.__wgState = { root, clearBtn, refreshBtn, count, preview, previewStage, previewImg, previewCaption, navLeft, navRight, gallery, thumbSlider, dir, dirWrap, selectedId: null, payload: null };
 
   thumbSlider.addEventListener("input", () => {
     layoutGrid(gallery, thumbSlider.value);
     node.setDirtyCanvas(true, true);
   });
 
-  closeBtn.addEventListener("click", (e) => {
-    e.preventDefault();
-    node.__wgState.selectedId = null;
-    node.__wgState.root.classList.remove("viewer-mode");
-    node.__wgState.preview.classList.add("hidden");
-    node.__wgState.previewImg.removeAttribute("src");
-    node.__wgState.previewCaption.textContent = "";
-    renderGallery(node, node.__wgState.payload || { entries: [] });
-    node.setDirtyCanvas(true, true);
-  });
 
   clearBtn.addEventListener("click", async (e) => {
     e.preventDefault();
@@ -201,6 +250,7 @@ function attachDom(node) {
     const payload = await fetchGallery(node.id);
     renderGallery(node, payload);
   });
+
 
   const domWidget = node.addDOMWidget("workflow_gallery", "WGDOM", root, {
     serialize: false,
@@ -246,6 +296,15 @@ app.registerExtension({
         attachDom(this);
       }
       return result;
+    };
+
+    const onRemoved = nodeType.prototype.onRemoved;
+    nodeType.prototype.onRemoved = function () {
+      if (this.__wgKeyHandler) {
+        document.removeEventListener("keydown", this.__wgKeyHandler);
+        this.__wgKeyHandler = null;
+      }
+      return onRemoved?.apply(this, arguments);
     };
   },
 });
