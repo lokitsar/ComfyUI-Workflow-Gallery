@@ -31,8 +31,9 @@ A practical use case is generating multiple showcase images for wildcard packs, 
 
 ## Screenshots
 
-### Workflow Example
-![Workflow Example](screenshots/workflow.png)
+## Example Workflow
+
+[Download example workflow](workflows/workflow.png)
 
 ### Gallery View
 ![Gallery View](screenshots/Screenshot%202026-03-08%20000942.png)
