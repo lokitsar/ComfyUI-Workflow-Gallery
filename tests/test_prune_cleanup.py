@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import tempfile
 import types
@@ -19,6 +20,11 @@ class _FakeRoutes:
 
 class _FakePromptServerClass:
     instance = types.SimpleNamespace(routes=_FakeRoutes(), send_sync=lambda *_args, **_kwargs: None)
+
+
+class _FakeRequest:
+    def __init__(self, node_id):
+        self.match_info = {"node_id": node_id}
 
 
 def _load_nodes_module():
@@ -43,7 +49,7 @@ def _load_nodes_module():
 
 
 class TestPruneCleanup(unittest.TestCase):
-    def test_prune_removes_full_and_thumb_files(self):
+    def test_prune_removes_full_and_thumb_files_and_index(self):
         nodes = _load_nodes_module()
 
         with tempfile.TemporaryDirectory() as td:
@@ -56,12 +62,11 @@ class TestPruneCleanup(unittest.TestCase):
             for p in (full_old, thumb_old, full_new, thumb_new):
                 p.write_bytes(b"x")
 
-            state = {
-                "entries": [
-                    {"id": "old", "full_path": str(full_old), "thumb_path": str(thumb_old)},
-                    {"id": "new", "full_path": str(full_new), "thumb_path": str(thumb_new)},
-                ]
-            }
+            old_entry = {"id": "old", "full_path": str(full_old), "thumb_path": str(thumb_old)}
+            new_entry = {"id": "new", "full_path": str(full_new), "thumb_path": str(thumb_new)}
+            state = {"entries": [old_entry, new_entry]}
+            nodes.ENTRY_INDEX["old"] = old_entry
+            nodes.ENTRY_INDEX["new"] = new_entry
 
             nodes._prune_entries("node-1", state, 1)
 
@@ -71,6 +76,34 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertFalse(thumb_old.exists())
             self.assertTrue(full_new.exists())
             self.assertTrue(thumb_new.exists())
+            self.assertIsNone(nodes._find_entry("old"))
+            self.assertIs(nodes._find_entry("new"), new_entry)
+
+    def test_clear_removes_entries_from_index(self):
+        nodes = _load_nodes_module()
+
+        with tempfile.TemporaryDirectory() as td:
+            temp_dir = Path(td)
+            full_path = temp_dir / "one.png"
+            thumb_path = temp_dir / "one.webp"
+            full_path.write_bytes(b"x")
+            thumb_path.write_bytes(b"x")
+
+            entry = {"id": "entry-1", "full_path": str(full_path), "thumb_path": str(thumb_path)}
+            nodes.GALLERY_STATE["node-1"] = {
+                "entries": [entry],
+                "max_images": 10,
+                "output_directory": str(temp_dir),
+            }
+            nodes.ENTRY_INDEX[entry["id"]] = entry
+
+            result = asyncio.run(nodes.workflow_gallery_clear(_FakeRequest("node-1")))
+
+            self.assertEqual(result["ok"], True)
+            self.assertEqual(nodes.GALLERY_STATE["node-1"]["entries"], [])
+            self.assertIsNone(nodes._find_entry("entry-1"))
+            self.assertFalse(full_path.exists())
+            self.assertFalse(thumb_path.exists())
 
 
 if __name__ == "__main__":

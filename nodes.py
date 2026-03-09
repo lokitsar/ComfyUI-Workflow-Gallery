@@ -13,6 +13,7 @@ from server import PromptServer
 
 
 GALLERY_STATE: Dict[str, Dict[str, Any]] = {}
+ENTRY_INDEX: Dict[str, Dict[str, Any]] = {}
 STATE_LOCK = threading.Lock()
 
 
@@ -114,6 +115,7 @@ def _prune_entries(node_id: str, state: Dict[str, Any], max_images: int) -> None
         removed.append(state["entries"].pop(0))
 
     for entry in removed:
+        ENTRY_INDEX.pop(entry.get("id", ""), None)
         for key in ("full_path", "thumb_path"):
             try:
                 if entry.get(key):
@@ -124,11 +126,7 @@ def _prune_entries(node_id: str, state: Dict[str, Any], max_images: int) -> None
 
 def _find_entry(entry_id: str) -> Dict[str, Any] | None:
     with STATE_LOCK:
-        for state in GALLERY_STATE.values():
-            for entry in state.get("entries", []):
-                if entry["id"] == entry_id:
-                    return entry
-    return None
+        return ENTRY_INDEX.get(entry_id)
 
 
 class WorkflowGallery:
@@ -213,6 +211,8 @@ class WorkflowGallery:
 
         with STATE_LOCK:
             state["entries"].extend(new_entries)
+            for entry in new_entries:
+                ENTRY_INDEX[entry["id"]] = entry
             _prune_entries(node_id, state, max_images)
 
         _send_gallery_update(node_id)
@@ -235,6 +235,8 @@ async def workflow_gallery_clear(request):
         state = GALLERY_STATE.setdefault(node_id, {"entries": [], "max_images": 100, "output_directory": str(DEFAULT_SAVE_DIR)})
         entries = list(state.get("entries", []))
         state["entries"] = []
+        for entry in entries:
+            ENTRY_INDEX.pop(entry.get("id", ""), None)
 
     for entry in entries:
         for key in ("full_path", "thumb_path"):
