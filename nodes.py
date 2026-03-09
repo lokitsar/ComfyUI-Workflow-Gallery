@@ -262,7 +262,8 @@ async def workflow_gallery_file(request):
     if not path.exists() or path.suffix.lower() not in ALLOWED_EXTENSIONS:
         return web.Response(status=404, text="File missing")
 
-    content_type = "image/webp" if path.suffix.lower() == ".webp" else "image/png"
+    content_type_map = {".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+    content_type = content_type_map.get(path.suffix.lower(), "application/octet-stream")
     response = web.FileResponse(path, headers={"Cache-Control": "no-store"})
     response.content_type = content_type
     return response

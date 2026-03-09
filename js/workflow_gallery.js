@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const EXTENSION_NAME = "dylan.workflow.gallery";
+const EXTENSION_NAME = "comfyui.workflow.gallery";
 const TARGET_CLASS = "WorkflowGallery";
 const GALLERY_HEIGHT = 680;
 
@@ -49,6 +49,7 @@ function ensureStyles() {
     .wg-empty { opacity:0.7; font-size:12px; padding:10px; text-align:center; }
     .wg-slider-row { display:flex; gap:8px; align-items:center; font-size:12px; }
     .wg-slider-row input[type='range'] { flex:1; }
+    .wg-order-hint { font-size:11px; opacity:0.75; text-align:right; }
   `;
   document.head.appendChild(style);
 }
@@ -225,6 +226,7 @@ function attachDom(node) {
     preview,
     gallery,
     el("div", { className: "wg-slider-row" }, [el("span", {}, ["Thumbnail size"]), thumbSlider]),
+    el("div", { className: "wg-order-hint" }, ["Newest first"]),
     el("div", { className: "wg-dir", style: { fontSize: "11px", opacity: "0.8", wordBreak: "break-all" } }, [dir]),
   ]);
 
