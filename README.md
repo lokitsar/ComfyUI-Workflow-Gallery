@@ -1,7 +1,3 @@
-# ComfyUI-Workflow-Gallery
-
-Workflow Gallery is a custom ComfyUI node that collects images passing through it and displays them inside a scrollable gallery directly on the node.
-
 ## Features
 
 - Receives image batches
@@ -35,12 +31,11 @@ Workflow Gallery is a custom ComfyUI node that collects images passing through i
 - If `save_to_disk` is disabled, the node still writes temporary originals into its package cache so viewer mode can work
 - Clearing the gallery also deletes files tracked by the current node state
 - This release is intentionally small and focused
-- Developed and tested in a local Windows ComfyUI setup
 
-## Screenshots
+## Recommended next improvements
 
-Add your screenshots here.
-
-## License
-
-MIT
+- Add a folder picker if your target ComfyUI frontend version supports it cleanly
+- Add pin/favorite support
+- Add export selected / save selected
+- Add captions or prompt metadata under thumbnails
+- Add persistence restore from disk on startup
