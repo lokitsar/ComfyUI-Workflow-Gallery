@@ -3,7 +3,6 @@ import { api } from "../../scripts/api.js";
 
 const EXTENSION_NAME = "dylan.workflow.gallery";
 const TARGET_CLASS = "WorkflowGallery";
-const MIN_NODE_WIDTH = 340;
 const GALLERY_HEIGHT = 680;
 
 function el(tag, attrs = {}, children = []) {
@@ -240,15 +239,23 @@ function attachDom(node) {
 
   clearBtn.addEventListener("click", async (e) => {
     e.preventDefault();
-    await clearGallery(node.id);
-    const payload = await fetchGallery(node.id);
-    renderGallery(node, payload);
+    try {
+      await clearGallery(node.id);
+      const payload = await fetchGallery(node.id);
+      renderGallery(node, payload);
+    } catch (err) {
+      console.warn("Workflow Gallery clear failed", err);
+    }
   });
 
   refreshBtn.addEventListener("click", async (e) => {
     e.preventDefault();
-    const payload = await fetchGallery(node.id);
-    renderGallery(node, payload);
+    try {
+      const payload = await fetchGallery(node.id);
+      renderGallery(node, payload);
+    } catch (err) {
+      console.warn("Workflow Gallery refresh failed", err);
+    }
   });
 
 

@@ -1,5 +1,4 @@
 import io
-import json
 import os
 import threading
 import time
@@ -36,11 +35,6 @@ def _safe_int(value: Any, default: int, minimum: int | None = None, maximum: int
         result = min(maximum, result)
     return result
 
-
-def _safe_str(value: Any, default: str = "") -> str:
-    if value is None:
-        return default
-    return str(value)
 
 
 def _sanitize_prefix(prefix: str) -> str:
