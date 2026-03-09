@@ -1,47 +1,46 @@
 # ComfyUI-Workflow-Gallery
 
-A custom ComfyUI node that saves generated images and displays them in a scrollable in-node gallery.
+Workflow Gallery is a custom ComfyUI node that collects images passing through it and displays them inside a scrollable gallery directly on the node.
 
 ## Features
 
-- Receives image batches from your workflow
-- Saves images to a chosen output directory
-- Displays saved images as thumbnails inside the node
-- Scrollable thumbnail gallery
-- Configurable maximum image count
-- Clear button to remove all images from the gallery
-- Adjustable thumbnail size
-- Click a thumbnail to open it in single-image viewer mode
+- Receives image batches
+- Saves images to a chosen directory
+- Shows thumbnails inside the node UI
+- Lets you clear the gallery
+- Lets you resize thumbnails with a slider
+- Click a thumbnail to open it in viewer mode
 - Click the expanded image to return to the gallery
 - Use on-screen left and right arrows to move through images in viewer mode
-- Passes images through unchanged for continued workflow use
+- Passes the input images through unchanged
+- Automatically prunes oldest images when the gallery reaches the configured limit
 
-## Why I made this
+## Install
 
-I wanted a cleaner way to review multiple generated images inside a workflow without digging through output folders every time.
+1. Copy this folder into `ComfyUI/custom_nodes/`
+2. Restart ComfyUI
+3. Search for **Workflow Gallery** in the node menu under `image/ui`
 
-A practical use case is generating multiple showcase images for wildcard packs, LoRAs, prompt packs, or Civitai posts. Instead of hunting through saved files, this node lets you review results directly inside ComfyUI.
+## Inputs
+
+- `images`: incoming image batch
+- `enabled`: enable or bypass gallery collection
+- `save_to_disk`: when enabled, writes originals to the chosen directory
+- `output_directory`: target folder for saved images
+- `filename_prefix`: filename prefix used for saved images
+- `max_images`: maximum number of images retained by the gallery
+
+## Notes
+
+- If `save_to_disk` is disabled, the node still writes temporary originals into its package cache so viewer mode can work
+- Clearing the gallery also deletes files tracked by the current node state
+- This release is intentionally small and focused
+- Developed and tested in a local Windows ComfyUI setup
 
 ## Screenshots
 
-### Workflow Example
-![Workflow Example](screenshots/workflow.png)
+Add your screenshots here.
 
-### Gallery View
-![Gallery View](screenshots/Screenshot%202026-03-08%20000942.png)
+## License
 
-### Viewer Mode
-![Viewer Mode](screenshots/Screenshot%202026-03-08%20014404.png)
-
-## Installation
-
-1. Close ComfyUI
-2. Copy this repository into your `ComfyUI/custom_nodes/` folder
-3. Restart ComfyUI
-
-Example:
-
-```text
-ComfyUI/
-└── custom_nodes/
-    └── ComfyUI-Workflow-Gallery/
+MIT
