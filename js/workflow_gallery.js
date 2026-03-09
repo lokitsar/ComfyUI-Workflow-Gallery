@@ -4,8 +4,8 @@ import { api } from "../../scripts/api.js";
 const EXTENSION_NAME = "comfyui.workflow.gallery";
 const TARGET_CLASS = "WorkflowGallery";
 const GALLERY_HEIGHT = 680;
-const THUMB_MIN = 80;
-const THUMB_MAX = 240;
+const THUMB_MIN = 120;
+const THUMB_MAX = 360;
 const THUMB_DEFAULT = 120;
 const THUMB_STORAGE_KEY = "workflow_gallery_thumb_size";
 
