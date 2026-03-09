@@ -120,11 +120,12 @@ def _prune_entries(node_id: str, state: Dict[str, Any], max_images: int) -> None
         removed.append(state["entries"].pop(0))
 
     for entry in removed:
-        try:
-            if entry.get("full_path"):
-                Path(entry["full_path"]).unlink(missing_ok=True)
-        except Exception:
-            pass
+        for key in ("full_path", "thumb_path"):
+            try:
+                if entry.get(key):
+                    Path(entry[key]).unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def _find_entry(entry_id: str) -> Dict[str, Any] | None:
