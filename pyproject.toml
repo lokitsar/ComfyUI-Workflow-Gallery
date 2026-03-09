@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "Dylan" }
+    { name = "lokitsar" }
 ]
 dependencies = [
     "Pillow>=10.0.0",
@@ -17,6 +17,6 @@ dependencies = [
 Repository = "https://github.com/lokitsar/ComfyUI-Workflow-Gallery"
 
 [tool.comfy]
-PublisherId = "dylan"
+PublisherId = "lokitsar"
 DisplayName = "Workflow Gallery"
 Icon = "️"
