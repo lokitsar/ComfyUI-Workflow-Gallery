@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const EXTENSION_NAME = "dylan.workflow.gallery";
+const EXTENSION_NAME = "comfyui.workflow.gallery";
 const TARGET_CLASS = "WorkflowGallery";
 const GALLERY_HEIGHT = 680;
 
