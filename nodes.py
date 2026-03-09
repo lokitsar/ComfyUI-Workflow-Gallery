@@ -1,5 +1,4 @@
 import io
-import json
 import os
 import threading
 import time
@@ -36,11 +35,6 @@ def _safe_int(value: Any, default: int, minimum: int | None = None, maximum: int
         result = min(maximum, result)
     return result
 
-
-def _safe_str(value: Any, default: str = "") -> str:
-    if value is None:
-        return default
-    return str(value)
 
 
 def _sanitize_prefix(prefix: str) -> str:
@@ -120,11 +114,12 @@ def _prune_entries(node_id: str, state: Dict[str, Any], max_images: int) -> None
         removed.append(state["entries"].pop(0))
 
     for entry in removed:
-        try:
-            if entry.get("full_path"):
-                Path(entry["full_path"]).unlink(missing_ok=True)
-        except Exception:
-            pass
+        for key in ("full_path", "thumb_path"):
+            try:
+                if entry.get(key):
+                    Path(entry[key]).unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def _find_entry(entry_id: str) -> Dict[str, Any] | None:
