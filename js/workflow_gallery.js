@@ -4,6 +4,10 @@ import { api } from "../../scripts/api.js";
 const EXTENSION_NAME = "comfyui.workflow.gallery";
 const TARGET_CLASS = "WorkflowGallery";
 const GALLERY_HEIGHT = 680;
+const THUMB_MIN = 80;
+const THUMB_MAX = 240;
+const THUMB_DEFAULT = 120;
+const THUMB_STORAGE_KEY = "workflow_gallery_thumb_size";
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -66,8 +70,28 @@ async function clearGallery(nodeId) {
   return await res.json();
 }
 
+function clampThumbSize(value) {
+  return Math.max(THUMB_MIN, Math.min(THUMB_MAX, Number(value) || THUMB_DEFAULT));
+}
+
+function loadThumbSizePreference() {
+  try {
+    return clampThumbSize(window.localStorage.getItem(THUMB_STORAGE_KEY));
+  } catch (_err) {
+    return THUMB_DEFAULT;
+  }
+}
+
+function saveThumbSizePreference(value) {
+  try {
+    window.localStorage.setItem(THUMB_STORAGE_KEY, String(clampThumbSize(value)));
+  } catch (_err) {
+    // Ignore storage errors (private mode, quota, disabled storage).
+  }
+}
+
 function layoutGrid(galleryEl, thumbSize) {
-  const size = Math.max(80, Math.min(240, Number(thumbSize) || 120));
+  const size = clampThumbSize(thumbSize);
   galleryEl.style.gridTemplateColumns = `repeat(auto-fill, minmax(${size}px, 1fr))`;
 }
 
@@ -200,12 +224,13 @@ function attachDom(node) {
   const previewStage = el("div", { className: "wg-preview-stage" }, [el("div", { className: "wg-preview-lane wg-preview-lane-left" }, [navLeft]), el("div", { className: "wg-preview-img-wrap" }, [previewImg]), el("div", { className: "wg-preview-lane wg-preview-lane-right" }, [navRight])]);
   const preview = el("div", { className: "wg-preview hidden" }, [previewStage, previewCaption]);
   const gallery = el("div", { className: "wg-gallery" });
+  const initialThumbSize = loadThumbSizePreference();
   const thumbSlider = el("input", {
     type: "range",
-    min: "80",
-    max: "240",
+    min: String(THUMB_MIN),
+    max: String(THUMB_MAX),
     step: "10",
-    value: "120",
+    value: String(initialThumbSize),
   });
   const dir = el("span", {}, [""]);
 
@@ -235,6 +260,7 @@ function attachDom(node) {
 
   thumbSlider.addEventListener("input", () => {
     layoutGrid(gallery, thumbSlider.value);
+    saveThumbSizePreference(thumbSlider.value);
     node.setDirtyCanvas(true, true);
   });
 
