@@ -29,11 +29,11 @@ function ensureStyles() {
   const style = document.createElement("style");
   style.id = "workflow-gallery-styles";
   style.textContent = `
-    .wg-root { display:flex; flex-direction:column; gap:8px; padding:8px; box-sizing:border-box; height:100%; min-height:${GALLERY_HEIGHT}px; }
+    .wg-root { display:flex; flex-direction:column; gap:8px; padding:8px; box-sizing:border-box; width:100%; min-width:0; min-height:0; overflow:visible; }
     .wg-topbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
     .wg-topbar button { cursor:pointer; }
     .wg-count { margin-left:auto; opacity:0.85; font-size:12px; }
-    .wg-preview { flex:1 1 auto; min-height:520px; overflow:hidden; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:8px; background:rgba(0,0,0,0.2); display:flex; flex-direction:column; position:relative; }
+    .wg-preview { flex:1 1 auto; min-height:240px; overflow:hidden; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:8px; background:rgba(0,0,0,0.2); display:flex; flex-direction:column; position:relative; min-width:0; }
     .wg-preview.hidden { display:none; }
     .wg-preview-stage { flex:1 1 auto; min-height:0; display:flex; align-items:stretch; gap:8px; }
     .wg-preview-lane { flex:0 0 48px; display:flex; align-items:center; justify-content:center; }
@@ -43,9 +43,9 @@ function ensureStyles() {
     .wg-nav:hover { background:rgba(255,255,255,0.12); }
     .wg-nav.hidden { visibility:hidden; pointer-events:none; opacity:0; }
     .wg-preview-caption { padding-top:6px; font-size:11px; line-height:1.25; word-break:break-word; opacity:0.9; text-align:center; }
-    .wg-gallery { flex:1 1 auto; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; min-height:180px; }
+    .wg-gallery { flex:1 1 auto; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; justify-content:start; min-height:0; min-width:0; max-width:100%; }
     .wg-root.viewer-mode .wg-gallery, .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-dir { display:none; }
-    .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:620px; }
+    .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:240px; }
     .wg-item { border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.18); cursor:pointer; }
     .wg-item img { display:block; width:100%; height:auto; }
     .wg-item.selected { outline:2px solid rgba(120,180,255,0.9); }
@@ -92,7 +92,7 @@ function saveThumbSizePreference(value) {
 
 function layoutGrid(galleryEl, thumbSize) {
   const size = clampThumbSize(thumbSize);
-  galleryEl.style.gridTemplateColumns = `repeat(auto-fill, minmax(${size}px, 1fr))`;
+  galleryEl.style.gridTemplateColumns = `repeat(auto-fill, ${size}px)`;
 }
 
 function getDisplayEntries(payload) {
@@ -297,7 +297,10 @@ function attachDom(node) {
   if (domWidget?.element?.style) {
     domWidget.element.style.width = "100%";
     domWidget.element.style.height = "100%";
+    domWidget.element.style.maxHeight = "100%";
     domWidget.element.style.display = "block";
+    domWidget.element.style.overflow = "auto";
+    domWidget.element.style.minWidth = "0";
   }
 
   node.size = [Math.max(node.size?.[0] || 0, 420), Math.max(node.size?.[1] || 0, 900)];
