@@ -18,7 +18,8 @@ STATE_LOCK = threading.Lock()
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-DEFAULT_SAVE_DIR = PACKAGE_DIR / "gallery_output"
+COMFYUI_DIR = PACKAGE_DIR.parent.parent
+DEFAULT_SAVE_DIR = COMFYUI_DIR / "output" / "Workflow-Gallery"
 DEFAULT_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -48,7 +49,7 @@ def _resolve_output_dir(raw_path: str) -> Path:
     if not raw_path:
         return DEFAULT_SAVE_DIR
     expanded = Path(os.path.expandvars(os.path.expanduser(raw_path)))
-    return expanded if expanded.is_absolute() else (PACKAGE_DIR / expanded).resolve()
+    return expanded if expanded.is_absolute() else (COMFYUI_DIR / expanded).resolve()
 
 
 def _tensor_to_pil(image_tensor) -> Image.Image:
