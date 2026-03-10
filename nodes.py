@@ -1,5 +1,4 @@
 import io
-import json
 import os
 import threading
 import time
@@ -14,11 +13,13 @@ from server import PromptServer
 
 
 GALLERY_STATE: Dict[str, Dict[str, Any]] = {}
+ENTRY_INDEX: Dict[str, Dict[str, Any]] = {}
 STATE_LOCK = threading.Lock()
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-DEFAULT_SAVE_DIR = PACKAGE_DIR / "gallery_output"
+COMFY_ROOT_DIR = PACKAGE_DIR.parents[2] if len(PACKAGE_DIR.parents) >= 3 else PACKAGE_DIR
+DEFAULT_SAVE_DIR = COMFY_ROOT_DIR / "output"
 DEFAULT_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -36,11 +37,6 @@ def _safe_int(value: Any, default: int, minimum: int | None = None, maximum: int
         result = min(maximum, result)
     return result
 
-
-def _safe_str(value: Any, default: str = "") -> str:
-    if value is None:
-        return default
-    return str(value)
 
 
 def _sanitize_prefix(prefix: str) -> str:
@@ -120,20 +116,18 @@ def _prune_entries(node_id: str, state: Dict[str, Any], max_images: int) -> None
         removed.append(state["entries"].pop(0))
 
     for entry in removed:
-        try:
-            if entry.get("full_path"):
-                Path(entry["full_path"]).unlink(missing_ok=True)
-        except Exception:
-            pass
+        ENTRY_INDEX.pop(entry.get("id", ""), None)
+        for key in ("full_path", "thumb_path"):
+            try:
+                if entry.get(key):
+                    Path(entry[key]).unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 def _find_entry(entry_id: str) -> Dict[str, Any] | None:
     with STATE_LOCK:
-        for state in GALLERY_STATE.values():
-            for entry in state.get("entries", []):
-                if entry["id"] == entry_id:
-                    return entry
-    return None
+        return ENTRY_INDEX.get(entry_id)
 
 
 class WorkflowGallery:
@@ -218,6 +212,8 @@ class WorkflowGallery:
 
         with STATE_LOCK:
             state["entries"].extend(new_entries)
+            for entry in new_entries:
+                ENTRY_INDEX[entry["id"]] = entry
             _prune_entries(node_id, state, max_images)
 
         _send_gallery_update(node_id)
@@ -240,6 +236,8 @@ async def workflow_gallery_clear(request):
         state = GALLERY_STATE.setdefault(node_id, {"entries": [], "max_images": 100, "output_directory": str(DEFAULT_SAVE_DIR)})
         entries = list(state.get("entries", []))
         state["entries"] = []
+        for entry in entries:
+            ENTRY_INDEX.pop(entry.get("id", ""), None)
 
     for entry in entries:
         for key in ("full_path", "thumb_path"):
@@ -267,7 +265,8 @@ async def workflow_gallery_file(request):
     if not path.exists() or path.suffix.lower() not in ALLOWED_EXTENSIONS:
         return web.Response(status=404, text="File missing")
 
-    content_type = "image/webp" if path.suffix.lower() == ".webp" else "image/png"
+    content_type_map = {".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+    content_type = content_type_map.get(path.suffix.lower(), "application/octet-stream")
     response = web.FileResponse(path, headers={"Cache-Control": "no-store"})
     response.content_type = content_type
     return response
