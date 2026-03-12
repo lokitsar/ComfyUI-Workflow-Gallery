@@ -1,10 +1,14 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
-const EXTENSION_NAME = "dylan.workflow.gallery";
+const EXTENSION_NAME = "comfyui.workflow.gallery";
 const TARGET_CLASS = "WorkflowGallery";
-const MIN_NODE_WIDTH = 340;
 const GALLERY_HEIGHT = 680;
+const THUMB_MIN = 120;
+const THUMB_MAX = 360;
+const THUMB_DEFAULT = 120;
+const THUMB_STORAGE_KEY = "workflow_gallery_thumb_size";
+let thumbSizeMemory = THUMB_DEFAULT;
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -26,11 +30,11 @@ function ensureStyles() {
   const style = document.createElement("style");
   style.id = "workflow-gallery-styles";
   style.textContent = `
-    .wg-root { display:flex; flex-direction:column; gap:8px; padding:8px; box-sizing:border-box; height:100%; min-height:${GALLERY_HEIGHT}px; }
+    .wg-root { display:flex; flex-direction:column; gap:8px; padding:8px; box-sizing:border-box; width:100%; min-width:0; min-height:0; height:100%; overflow:hidden; }
     .wg-topbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
     .wg-topbar button { cursor:pointer; }
     .wg-count { margin-left:auto; opacity:0.85; font-size:12px; }
-    .wg-preview { flex:1 1 auto; min-height:520px; overflow:hidden; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:8px; background:rgba(0,0,0,0.2); display:flex; flex-direction:column; position:relative; }
+    .wg-preview { flex:1 1 auto; min-height:200px; overflow:hidden; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:8px; background:rgba(0,0,0,0.2); display:flex; flex-direction:column; position:relative; min-width:0; }
     .wg-preview.hidden { display:none; }
     .wg-preview-stage { flex:1 1 auto; min-height:0; display:flex; align-items:stretch; gap:8px; }
     .wg-preview-lane { flex:0 0 48px; display:flex; align-items:center; justify-content:center; }
@@ -40,9 +44,9 @@ function ensureStyles() {
     .wg-nav:hover { background:rgba(255,255,255,0.12); }
     .wg-nav.hidden { visibility:hidden; pointer-events:none; opacity:0; }
     .wg-preview-caption { padding-top:6px; font-size:11px; line-height:1.25; word-break:break-word; opacity:0.9; text-align:center; }
-    .wg-gallery { flex:1 1 auto; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; min-height:180px; }
-    .wg-root.viewer-mode .wg-gallery, .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-dir { display:none; }
-    .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:620px; }
+    .wg-gallery { flex:1 1 auto; min-height:0; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; overscroll-behavior:contain; }
+    .wg-root.viewer-mode .wg-gallery, .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-meta { display:none; }
+    .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:0; }
     .wg-item { border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.18); cursor:pointer; }
     .wg-item img { display:block; width:100%; height:auto; }
     .wg-item.selected { outline:2px solid rgba(120,180,255,0.9); }
@@ -50,6 +54,7 @@ function ensureStyles() {
     .wg-empty { opacity:0.7; font-size:12px; padding:10px; text-align:center; }
     .wg-slider-row { display:flex; gap:8px; align-items:center; font-size:12px; }
     .wg-slider-row input[type='range'] { flex:1; }
+    .wg-order-hint { font-size:11px; opacity:0.75; text-align:right; }
   `;
   document.head.appendChild(style);
 }
@@ -66,8 +71,34 @@ async function clearGallery(nodeId) {
   return await res.json();
 }
 
+function clampThumbSize(value) {
+  return Math.max(THUMB_MIN, Math.min(THUMB_MAX, Number(value) || THUMB_DEFAULT));
+}
+
+function loadThumbSizePreference() {
+  try {
+    const saved = globalThis?.localStorage?.getItem(THUMB_STORAGE_KEY);
+    if (saved == null) return thumbSizeMemory;
+    const size = clampThumbSize(saved);
+    thumbSizeMemory = size;
+    return size;
+  } catch (_err) {
+    return thumbSizeMemory;
+  }
+}
+
+function saveThumbSizePreference(value) {
+  const size = clampThumbSize(value);
+  thumbSizeMemory = size;
+  try {
+    globalThis?.localStorage?.setItem(THUMB_STORAGE_KEY, String(size));
+  } catch (_err) {
+    // Ignore storage errors (private mode, quota, disabled storage).
+  }
+}
+
 function layoutGrid(galleryEl, thumbSize) {
-  const size = Math.max(80, Math.min(240, Number(thumbSize) || 120));
+  const size = clampThumbSize(thumbSize);
   galleryEl.style.gridTemplateColumns = `repeat(auto-fill, minmax(${size}px, 1fr))`;
 }
 
@@ -116,8 +147,9 @@ function renderGallery(node, payload) {
 
   state.payload = payload;
   state.count.textContent = `${payload.count} / ${payload.max_images}`;
-  state.dir.textContent = payload.output_directory || "";
-  if (state.dirWrap) state.dirWrap.textContent = payload.output_directory || "";
+  const saveToDisk = payload.save_to_disk !== false;
+  state.saveMode.textContent = `Saving full images: ${saveToDisk ? "ON" : "OFF (cache only)"}`;
+  state.dir.textContent = `Output directory: ${payload.output_directory || ""}`;
   state.gallery.innerHTML = "";
   layoutGrid(state.gallery, state.thumbSlider.value);
 
@@ -200,14 +232,16 @@ function attachDom(node) {
   const previewStage = el("div", { className: "wg-preview-stage" }, [el("div", { className: "wg-preview-lane wg-preview-lane-left" }, [navLeft]), el("div", { className: "wg-preview-img-wrap" }, [previewImg]), el("div", { className: "wg-preview-lane wg-preview-lane-right" }, [navRight])]);
   const preview = el("div", { className: "wg-preview hidden" }, [previewStage, previewCaption]);
   const gallery = el("div", { className: "wg-gallery" });
+  const initialThumbSize = loadThumbSizePreference();
   const thumbSlider = el("input", {
     type: "range",
-    min: "80",
-    max: "240",
+    min: String(THUMB_MIN),
+    max: String(THUMB_MAX),
     step: "10",
-    value: "120",
+    value: String(initialThumbSize),
   });
-  const dir = el("span", {}, [""]);
+  const saveMode = el("div", { className: "wg-save-mode" }, [""]);
+  const dir = el("div", { className: "wg-dir" }, [""]);
 
   previewImg.addEventListener("click", () => closeViewer(node));
   navLeft.addEventListener("click", (e) => {
@@ -226,29 +260,44 @@ function attachDom(node) {
     preview,
     gallery,
     el("div", { className: "wg-slider-row" }, [el("span", {}, ["Thumbnail size"]), thumbSlider]),
-    el("div", { className: "wg-dir", style: { fontSize: "11px", opacity: "0.8", wordBreak: "break-all" } }, [dir]),
+    el("div", { className: "wg-order-hint" }, ["Newest first"]),
+    el("div", { className: "wg-meta", style: { fontSize: "11px", opacity: "0.8", wordBreak: "break-all", display: "grid", gap: "2px" } }, [saveMode, dir]),
   ]);
 
-  const dirWrap = root.querySelector('.wg-dir');
-  node.__wgState = { root, clearBtn, refreshBtn, count, preview, previewStage, previewImg, previewCaption, navLeft, navRight, gallery, thumbSlider, dir, dirWrap, selectedId: null, payload: null };
+  node.__wgState = { root, clearBtn, refreshBtn, count, preview, previewStage, previewImg, previewCaption, navLeft, navRight, gallery, thumbSlider, saveMode, dir, selectedId: null, payload: null };
 
-  thumbSlider.addEventListener("input", () => {
-    layoutGrid(gallery, thumbSlider.value);
+  const applyThumbSizePreference = () => {
+    const size = clampThumbSize(thumbSlider.value);
+    thumbSlider.value = String(size);
+    layoutGrid(gallery, size);
+    saveThumbSizePreference(size);
     node.setDirtyCanvas(true, true);
-  });
+  };
+
+  thumbSlider.addEventListener("input", applyThumbSizePreference);
+  thumbSlider.addEventListener("change", applyThumbSizePreference);
+  applyThumbSizePreference();
 
 
   clearBtn.addEventListener("click", async (e) => {
     e.preventDefault();
-    await clearGallery(node.id);
-    const payload = await fetchGallery(node.id);
-    renderGallery(node, payload);
+    try {
+      await clearGallery(node.id);
+      const payload = await fetchGallery(node.id);
+      renderGallery(node, payload);
+    } catch (err) {
+      console.warn("Workflow Gallery clear failed", err);
+    }
   });
 
   refreshBtn.addEventListener("click", async (e) => {
     e.preventDefault();
-    const payload = await fetchGallery(node.id);
-    renderGallery(node, payload);
+    try {
+      const payload = await fetchGallery(node.id);
+      renderGallery(node, payload);
+    } catch (err) {
+      console.warn("Workflow Gallery refresh failed", err);
+    }
   });
 
 
