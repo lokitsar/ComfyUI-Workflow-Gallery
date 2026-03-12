@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - release/**
+      - codex/**
+      - test-**
+  pull_request:
+
+jobs:
+  backend-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy Pillow
+
+      - name: Check for unresolved merge markers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          markers = ("<<<<<<<", "=======", ">>>>>>>")
+          skipped_dirs = {".git", ".venv", "venv", "__pycache__"}
+          offenders = []
+
+          for path in Path(".").rglob("*"):
+              if not path.is_file():
+                  continue
+              if any(part in skipped_dirs for part in path.parts):
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except UnicodeDecodeError:
+                  continue
+              for line_number, line in enumerate(text.splitlines(), start=1):
+                  if line.startswith(markers):
+                      offenders.append(f"{path}:{line_number}: {line}")
+
+          if offenders:
+              print("Found unresolved merge markers:")
+              print("\n".join(offenders))
+              raise SystemExit(1)
+          PY
+
+      - name: Syntax check
+        run: python -m py_compile nodes.py
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -p "test_*.py"
