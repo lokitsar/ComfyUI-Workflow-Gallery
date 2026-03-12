@@ -3,6 +3,11 @@ import sys
 import tempfile
 import types
 import unittest
+<<<<<<< HEAD
+
+import numpy as np
+=======
+>>>>>>> origin/main
 from pathlib import Path
 
 
@@ -27,6 +32,20 @@ class _FakeRequest:
         self.match_info = {"node_id": node_id}
 
 
+<<<<<<< HEAD
+class _FakeTensor:
+    def __init__(self, arr):
+        self._arr = arr
+
+    def cpu(self):
+        return self
+
+    def numpy(self):
+        return self._arr
+
+
+=======
+>>>>>>> origin/main
 def _load_nodes_module():
     fake_web = types.SimpleNamespace(
         Response=lambda *args, **kwargs: types.SimpleNamespace(args=args, kwargs=kwargs),
@@ -79,6 +98,18 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertIsNone(nodes._find_entry("old"))
             self.assertIs(nodes._find_entry("new"), new_entry)
 
+<<<<<<< HEAD
+
+    def test_legacy_output_directory_maps_to_comfy_output(self):
+        nodes = _load_nodes_module()
+
+        legacy_path = str(nodes.PACKAGE_DIR / "gallery_output")
+        normalized = nodes._normalize_output_dir(legacy_path)
+
+        self.assertEqual(normalized, nodes.DEFAULT_SAVE_DIR)
+
+=======
+>>>>>>> origin/main
     def test_clear_removes_entries_from_index(self):
         nodes = _load_nodes_module()
 
@@ -106,5 +137,44 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertFalse(thumb_path.exists())
 
 
+<<<<<<< HEAD
+    def test_collect_save_to_disk_true_writes_to_selected_output_dir(self):
+        nodes = _load_nodes_module()
+
+        with tempfile.TemporaryDirectory() as td:
+            output_dir = Path(td) / "out"
+            image = _FakeTensor(np.ones((8, 8, 3), dtype=np.float32))
+
+            gallery = nodes.WorkflowGallery()
+            gallery.collect([image], save_to_disk=True, output_directory=str(output_dir), unique_id="node-save-true")
+
+            entries = nodes.GALLERY_STATE["node-save-true"]["entries"]
+            self.assertEqual(len(entries), 1)
+            entry = entries[0]
+            self.assertTrue(Path(entry["full_path"]).exists())
+            self.assertTrue(str(Path(entry["full_path"]).parent).startswith(str(output_dir.resolve())))
+
+    def test_collect_save_to_disk_false_writes_to_cache_dir(self):
+        nodes = _load_nodes_module()
+
+        with tempfile.TemporaryDirectory() as td:
+            output_dir = Path(td) / "out"
+            image = _FakeTensor(np.ones((8, 8, 3), dtype=np.float32))
+
+            gallery = nodes.WorkflowGallery()
+            gallery.collect([image], save_to_disk=False, output_directory=str(output_dir), unique_id="node-save-false")
+
+            entries = nodes.GALLERY_STATE["node-save-false"]["entries"]
+            self.assertEqual(len(entries), 1)
+            entry = entries[0]
+            full_path = Path(entry["full_path"]).resolve()
+            self.assertTrue(full_path.exists())
+            self.assertEqual(full_path.parent.name, "unsaved_cache")
+            self.assertTrue(str(full_path).startswith(str(nodes.CACHE_BASE_DIR.resolve())))
+            self.assertEqual(nodes.GALLERY_STATE["node-save-false"]["save_to_disk"], False)
+
+
+=======
+>>>>>>> origin/main
 if __name__ == "__main__":
     unittest.main()

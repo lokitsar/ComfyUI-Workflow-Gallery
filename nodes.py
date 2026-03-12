@@ -18,9 +18,17 @@ STATE_LOCK = threading.Lock()
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
+<<<<<<< HEAD
+COMFY_ROOT_DIR = PACKAGE_DIR.parents[2] if len(PACKAGE_DIR.parents) >= 3 else PACKAGE_DIR
+DEFAULT_SAVE_DIR = COMFY_ROOT_DIR / "output"
+LEGACY_SAVE_DIR = PACKAGE_DIR / "gallery_output"
+CACHE_BASE_DIR = DEFAULT_SAVE_DIR / "Workflow-Gallery"
+=======
 COMFYUI_DIR = PACKAGE_DIR.parent.parent
 DEFAULT_SAVE_DIR = COMFYUI_DIR / "output" / "Workflow-Gallery"
+>>>>>>> origin/main
 DEFAULT_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -50,6 +58,14 @@ def _resolve_output_dir(raw_path: str) -> Path:
         return DEFAULT_SAVE_DIR
     expanded = Path(os.path.expandvars(os.path.expanduser(raw_path)))
     return expanded if expanded.is_absolute() else (COMFYUI_DIR / expanded).resolve()
+
+
+def _normalize_output_dir(raw_path: str) -> Path:
+    resolved = _resolve_output_dir(raw_path).resolve()
+    legacy = LEGACY_SAVE_DIR.resolve()
+    if os.path.normcase(str(resolved)) == os.path.normcase(str(legacy)):
+        return DEFAULT_SAVE_DIR
+    return resolved
 
 
 def _tensor_to_pil(image_tensor) -> Image.Image:
@@ -87,6 +103,7 @@ def _gallery_payload(node_id: str) -> Dict[str, Any]:
             "count": len(entries),
             "max_images": state.get("max_images", 100),
             "output_directory": state.get("output_directory", str(DEFAULT_SAVE_DIR)),
+            "save_to_disk": state.get("save_to_disk", True),
             "entries": entries,
         }
 
@@ -95,7 +112,7 @@ def _send_gallery_update(node_id: str) -> None:
     PromptServer.instance.send_sync("workflow_gallery_update", _gallery_payload(node_id))
 
 
-def _ensure_state(node_id: str, output_directory: str, max_images: int) -> Dict[str, Any]:
+def _ensure_state(node_id: str, output_directory: str, max_images: int, save_to_disk: bool) -> Dict[str, Any]:
     with STATE_LOCK:
         state = GALLERY_STATE.setdefault(
             str(node_id),
@@ -103,10 +120,12 @@ def _ensure_state(node_id: str, output_directory: str, max_images: int) -> Dict[
                 "entries": [],
                 "max_images": max_images,
                 "output_directory": output_directory,
+                "save_to_disk": save_to_disk,
             },
         )
         state["max_images"] = max_images
         state["output_directory"] = output_directory
+        state["save_to_disk"] = save_to_disk
         return state
 
 
@@ -165,10 +184,10 @@ class WorkflowGallery:
     ):
         node_id = str(unique_id or "unknown")
         max_images = _safe_int(max_images, 48, 1, 500)
-        resolved_output_dir = _resolve_output_dir(output_directory)
+        resolved_output_dir = _normalize_output_dir(output_directory)
         resolved_output_dir.mkdir(parents=True, exist_ok=True)
 
-        state = _ensure_state(node_id, str(resolved_output_dir), max_images)
+        state = _ensure_state(node_id, str(resolved_output_dir), max_images, bool(save_to_disk))
 
         if not enabled:
             _send_gallery_update(node_id)
@@ -189,12 +208,12 @@ class WorkflowGallery:
                 pil_image.save(full_path, format="PNG", compress_level=4)
             else:
                 # Still save to a temp-ish package folder so the frontend can display original-size images.
-                temp_dir = DEFAULT_SAVE_DIR / "unsaved_cache"
+                temp_dir = CACHE_BASE_DIR / "unsaved_cache"
                 temp_dir.mkdir(parents=True, exist_ok=True)
                 full_path = temp_dir / filename
                 pil_image.save(full_path, format="PNG", compress_level=4)
 
-            thumb_path = DEFAULT_SAVE_DIR / "thumb_cache" / f"{entry_id}.webp"
+            thumb_path = CACHE_BASE_DIR / "thumb_cache" / f"{entry_id}.webp"
             thumb_path.parent.mkdir(parents=True, exist_ok=True)
             thumb_path.write_bytes(_thumbnail_bytes(pil_image))
 
@@ -233,7 +252,7 @@ async def workflow_gallery_state(request):
 async def workflow_gallery_clear(request):
     node_id = request.match_info["node_id"]
     with STATE_LOCK:
-        state = GALLERY_STATE.setdefault(node_id, {"entries": [], "max_images": 100, "output_directory": str(DEFAULT_SAVE_DIR)})
+        state = GALLERY_STATE.setdefault(node_id, {"entries": [], "max_images": 100, "output_directory": str(DEFAULT_SAVE_DIR), "save_to_disk": True})
         entries = list(state.get("entries", []))
         state["entries"] = []
         for entry in entries:
