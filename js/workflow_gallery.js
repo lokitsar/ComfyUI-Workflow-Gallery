@@ -8,10 +8,8 @@ const THUMB_MIN = 120;
 const THUMB_MAX = 360;
 const THUMB_DEFAULT = 120;
 const THUMB_STORAGE_KEY = "workflow_gallery_thumb_size";
-<<<<<<< HEAD
 let thumbSizeMemory = THUMB_DEFAULT;
-=======
->>>>>>> origin/main
+let thumbSizeMemory = THUMB_DEFAULT;
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -33,19 +31,16 @@ function ensureStyles() {
   const style = document.createElement("style");
   style.id = "workflow-gallery-styles";
   style.textContent = `
-<<<<<<< HEAD
     .wg-root { display:flex; flex-direction:column; gap:8px; padding:8px; box-sizing:border-box; width:100%; min-width:0; min-height:0; height:100%; overflow:hidden; }
     .wg-topbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
     .wg-topbar button { cursor:pointer; }
     .wg-count { margin-left:auto; opacity:0.85; font-size:12px; }
     .wg-preview { flex:1 1 auto; min-height:200px; overflow:hidden; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:8px; background:rgba(0,0,0,0.2); display:flex; flex-direction:column; position:relative; min-width:0; }
-=======
     .wg-root { display:flex; flex-direction:column; gap:8px; padding:8px; box-sizing:border-box; width:100%; min-width:0; min-height:0; overflow:visible; }
     .wg-topbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
     .wg-topbar button { cursor:pointer; }
     .wg-count { margin-left:auto; opacity:0.85; font-size:12px; }
     .wg-preview { flex:1 1 auto; min-height:240px; overflow:hidden; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:8px; background:rgba(0,0,0,0.2); display:flex; flex-direction:column; position:relative; min-width:0; }
->>>>>>> origin/main
     .wg-preview.hidden { display:none; }
     .wg-preview-stage { flex:1 1 auto; min-height:0; display:flex; align-items:stretch; gap:8px; }
     .wg-preview-lane { flex:0 0 48px; display:flex; align-items:center; justify-content:center; }
@@ -55,15 +50,9 @@ function ensureStyles() {
     .wg-nav:hover { background:rgba(255,255,255,0.12); }
     .wg-nav.hidden { visibility:hidden; pointer-events:none; opacity:0; }
     .wg-preview-caption { padding-top:6px; font-size:11px; line-height:1.25; word-break:break-word; opacity:0.9; text-align:center; }
-<<<<<<< HEAD
-    .wg-gallery { flex:1 1 auto; min-height:0; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; overscroll-behavior:contain; }
-    .wg-root.viewer-mode .wg-gallery, .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-meta { display:none; }
-    .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:0; }
-=======
     .wg-gallery { flex:1 1 auto; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; justify-content:start; min-height:0; min-width:0; max-width:100%; }
     .wg-root.viewer-mode .wg-gallery, .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-dir { display:none; }
     .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:240px; }
->>>>>>> origin/main
     .wg-item { border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.18); cursor:pointer; }
     .wg-item img { display:block; width:100%; height:auto; }
     .wg-item.selected { outline:2px solid rgba(120,180,255,0.9); }
@@ -94,7 +83,6 @@ function clampThumbSize(value) {
 
 function loadThumbSizePreference() {
   try {
-<<<<<<< HEAD
     const saved = globalThis?.localStorage?.getItem(THUMB_STORAGE_KEY);
     if (saved == null) return thumbSizeMemory;
     const size = clampThumbSize(saved);
@@ -102,24 +90,21 @@ function loadThumbSizePreference() {
     return size;
   } catch (_err) {
     return thumbSizeMemory;
-=======
     return clampThumbSize(window.localStorage.getItem(THUMB_STORAGE_KEY));
   } catch (_err) {
     return THUMB_DEFAULT;
->>>>>>> origin/main
+
   }
 }
 
 function saveThumbSizePreference(value) {
-<<<<<<< HEAD
   const size = clampThumbSize(value);
   thumbSizeMemory = size;
   try {
     globalThis?.localStorage?.setItem(THUMB_STORAGE_KEY, String(size));
-=======
   try {
     window.localStorage.setItem(THUMB_STORAGE_KEY, String(clampThumbSize(value)));
->>>>>>> origin/main
+
   } catch (_err) {
     // Ignore storage errors (private mode, quota, disabled storage).
   }
@@ -127,11 +112,9 @@ function saveThumbSizePreference(value) {
 
 function layoutGrid(galleryEl, thumbSize) {
   const size = clampThumbSize(thumbSize);
-<<<<<<< HEAD
   galleryEl.style.gridTemplateColumns = `repeat(auto-fill, minmax(${size}px, 1fr))`;
-=======
   galleryEl.style.gridTemplateColumns = `repeat(auto-fill, ${size}px)`;
->>>>>>> origin/main
+
 }
 
 function getDisplayEntries(payload) {
@@ -293,26 +276,19 @@ function attachDom(node) {
     gallery,
     el("div", { className: "wg-slider-row" }, [el("span", {}, ["Thumbnail size"]), thumbSlider]),
     el("div", { className: "wg-order-hint" }, ["Newest first"]),
-<<<<<<< HEAD
-    el("div", { className: "wg-meta", style: { fontSize: "11px", opacity: "0.8", wordBreak: "break-all", display: "grid", gap: "2px" } }, [saveMode, dir]),
-=======
     el("div", { className: "wg-dir", style: { fontSize: "11px", opacity: "0.8", wordBreak: "break-all" } }, [dir]),
->>>>>>> origin/main
   ]);
 
   node.__wgState = { root, clearBtn, refreshBtn, count, preview, previewStage, previewImg, previewCaption, navLeft, navRight, gallery, thumbSlider, saveMode, dir, selectedId: null, payload: null };
 
-<<<<<<< HEAD
   const applyThumbSizePreference = () => {
     const size = clampThumbSize(thumbSlider.value);
     thumbSlider.value = String(size);
     layoutGrid(gallery, size);
     saveThumbSizePreference(size);
-=======
   thumbSlider.addEventListener("input", () => {
     layoutGrid(gallery, thumbSlider.value);
     saveThumbSizePreference(thumbSlider.value);
->>>>>>> origin/main
     node.setDirtyCanvas(true, true);
   };
 

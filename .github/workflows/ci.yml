@@ -1,5 +1,11 @@
 name: CI
 
+<<<<<<< codex/2026-03-12-15-50-09
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+=======
+>>>>>>> main
 on:
   push:
     branches:
@@ -15,10 +21,17 @@ jobs:
 
     steps:
       - name: Checkout repository
+<<<<<<< codex/2026-03-12-15-50-09
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+=======
         uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
+>>>>>>> main
         with:
           python-version: '3.10'
 
@@ -27,6 +40,37 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy Pillow
 
+<<<<<<< codex/2026-03-12-15-50-09
+      - name: Check for unresolved merge markers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          markers = ("<<<<<<<", "=======", ">>>>>>>")
+          skipped_dirs = {".git", ".venv", "venv", "__pycache__"}
+          offenders = []
+
+          for path in Path(".").rglob("*"):
+              if not path.is_file():
+                  continue
+              if any(part in skipped_dirs for part in path.parts):
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except UnicodeDecodeError:
+                  continue
+              for line_number, line in enumerate(text.splitlines(), start=1):
+                  if line.startswith(markers):
+                      offenders.append(f"{path}:{line_number}: {line}")
+
+          if offenders:
+              print("Found unresolved merge markers:")
+              print("\n".join(offenders))
+              raise SystemExit(1)
+          PY
+
+=======
+>>>>>>> main
       - name: Syntax check
         run: python -m py_compile nodes.py
 
