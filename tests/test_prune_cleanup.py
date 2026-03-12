@@ -5,6 +5,11 @@ import types
 import unittest
 
 import numpy as np
+
+import numpy as np
+
+import numpy as np
+
 from pathlib import Path
 
 
@@ -29,6 +34,7 @@ class _FakeRequest:
         self.match_info = {"node_id": node_id}
 
 
+
 class _FakeTensor:
     def __init__(self, arr):
         self._arr = arr
@@ -38,6 +44,7 @@ class _FakeTensor:
 
     def numpy(self):
         return self._arr
+
 
 
 def _load_nodes_module():
@@ -93,6 +100,7 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertIs(nodes._find_entry("new"), new_entry)
 
 
+
     def test_legacy_output_directory_maps_to_comfy_output(self):
         nodes = _load_nodes_module()
 
@@ -126,6 +134,7 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertIsNone(nodes._find_entry("entry-1"))
             self.assertFalse(full_path.exists())
             self.assertFalse(thumb_path.exists())
+
 
 
     def test_collect_save_to_disk_true_writes_to_selected_output_dir(self):
@@ -162,6 +171,7 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertEqual(full_path.parent.name, "unsaved_cache")
             self.assertTrue(str(full_path).startswith(str(nodes.CACHE_BASE_DIR.resolve())))
             self.assertEqual(nodes.GALLERY_STATE["node-save-false"]["save_to_disk"], False)
+
 
 
 if __name__ == "__main__":

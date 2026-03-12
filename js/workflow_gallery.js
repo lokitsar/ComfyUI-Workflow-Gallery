@@ -100,6 +100,8 @@ function saveThumbSizePreference(value) {
 function layoutGrid(galleryEl, thumbSize) {
   const size = clampThumbSize(thumbSize);
   galleryEl.style.gridTemplateColumns = `repeat(auto-fill, minmax(${size}px, 1fr))`;
+  galleryEl.style.gridTemplateColumns = `repeat(auto-fill, ${size}px)`;
+
 }
 
 function getDisplayEntries(payload) {
@@ -311,7 +313,10 @@ function attachDom(node) {
   if (domWidget?.element?.style) {
     domWidget.element.style.width = "100%";
     domWidget.element.style.height = "100%";
+    domWidget.element.style.maxHeight = "100%";
     domWidget.element.style.display = "block";
+    domWidget.element.style.overflow = "auto";
+    domWidget.element.style.minWidth = "0";
   }
 
   node.size = [Math.max(node.size?.[0] || 0, 420), Math.max(node.size?.[1] || 0, 900)];
