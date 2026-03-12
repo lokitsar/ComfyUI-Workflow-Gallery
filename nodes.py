@@ -22,6 +22,8 @@ COMFY_ROOT_DIR = PACKAGE_DIR.parents[2] if len(PACKAGE_DIR.parents) >= 3 else PA
 DEFAULT_SAVE_DIR = COMFY_ROOT_DIR / "output"
 LEGACY_SAVE_DIR = PACKAGE_DIR / "gallery_output"
 CACHE_BASE_DIR = DEFAULT_SAVE_DIR / "Workflow-Gallery"
+COMFYUI_DIR = PACKAGE_DIR.parent.parent
+DEFAULT_SAVE_DIR = COMFYUI_DIR / "output" / "Workflow-Gallery"
 DEFAULT_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -52,7 +54,15 @@ def _resolve_output_dir(raw_path: str) -> Path:
     if not raw_path:
         return DEFAULT_SAVE_DIR
     expanded = Path(os.path.expandvars(os.path.expanduser(raw_path)))
-    return expanded if expanded.is_absolute() else (PACKAGE_DIR / expanded).resolve()
+    return expanded if expanded.is_absolute() else (COMFYUI_DIR / expanded).resolve()
+
+
+def _normalize_output_dir(raw_path: str) -> Path:
+    resolved = _resolve_output_dir(raw_path).resolve()
+    legacy = LEGACY_SAVE_DIR.resolve()
+    if os.path.normcase(str(resolved)) == os.path.normcase(str(legacy)):
+        return DEFAULT_SAVE_DIR
+    return resolved
 
 
 def _normalize_output_dir(raw_path: str) -> Path:

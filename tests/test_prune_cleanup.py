@@ -3,8 +3,6 @@ import sys
 import tempfile
 import types
 import unittest
-
-import numpy as np
 from pathlib import Path
 
 
@@ -162,6 +160,7 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertEqual(full_path.parent.name, "unsaved_cache")
             self.assertTrue(str(full_path).startswith(str(nodes.CACHE_BASE_DIR.resolve())))
             self.assertEqual(nodes.GALLERY_STATE["node-save-false"]["save_to_disk"], False)
+
 
 
 if __name__ == "__main__":
