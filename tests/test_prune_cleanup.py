@@ -3,8 +3,11 @@ import sys
 import tempfile
 import types
 import unittest
+<<<<<<< HEAD
 
 import numpy as np
+=======
+>>>>>>> origin/main
 from pathlib import Path
 
 
@@ -29,6 +32,7 @@ class _FakeRequest:
         self.match_info = {"node_id": node_id}
 
 
+<<<<<<< HEAD
 class _FakeTensor:
     def __init__(self, arr):
         self._arr = arr
@@ -40,6 +44,8 @@ class _FakeTensor:
         return self._arr
 
 
+=======
+>>>>>>> origin/main
 def _load_nodes_module():
     fake_web = types.SimpleNamespace(
         Response=lambda *args, **kwargs: types.SimpleNamespace(args=args, kwargs=kwargs),
@@ -92,6 +98,7 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertIsNone(nodes._find_entry("old"))
             self.assertIs(nodes._find_entry("new"), new_entry)
 
+<<<<<<< HEAD
 
     def test_legacy_output_directory_maps_to_comfy_output(self):
         nodes = _load_nodes_module()
@@ -101,6 +108,8 @@ class TestPruneCleanup(unittest.TestCase):
 
         self.assertEqual(normalized, nodes.DEFAULT_SAVE_DIR)
 
+=======
+>>>>>>> origin/main
     def test_clear_removes_entries_from_index(self):
         nodes = _load_nodes_module()
 
@@ -128,6 +137,7 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertFalse(thumb_path.exists())
 
 
+<<<<<<< HEAD
     def test_collect_save_to_disk_true_writes_to_selected_output_dir(self):
         nodes = _load_nodes_module()
 
@@ -164,5 +174,7 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertEqual(nodes.GALLERY_STATE["node-save-false"]["save_to_disk"], False)
 
 
+=======
+>>>>>>> origin/main
 if __name__ == "__main__":
     unittest.main()
