@@ -125,8 +125,6 @@ def _resolve_text_from_ref(prompt_graph: Dict[str, Any], value: Any, visited: se
         return text.strip() if isinstance(text, str) else ""
 
     for child_value in inputs.values():
-        if not isinstance(child_value, (list, tuple)):
-            continue
         text = _resolve_text_from_ref(prompt_graph, child_value, current_visited)
         if text:
             return text

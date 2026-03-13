@@ -108,6 +108,24 @@ class TestPruneCleanup(unittest.TestCase):
         self.assertEqual(positive, "direct positive")
         self.assertEqual(negative, "direct negative")
 
+    def test_extract_prompts_walks_through_direct_string_link_in_intermediate_node(self):
+        nodes = _load_nodes_module()
+
+        prompt_graph = {
+            "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "positive via intermediate"}},
+            "2": {
+                "class_type": "ConditioningSetTimestepRange",
+                "inputs": {"conditioning": "1", "label": "noise on beginning steps", "start": 0.0, "end": 0.3},
+            },
+            "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "negative via direct"}},
+            "4": {"class_type": "KSampler", "inputs": {"positive": ["2", 0], "negative": "3"}},
+        }
+
+        positive, negative = nodes._extract_prompts(prompt_graph)
+
+        self.assertEqual(positive, "positive via intermediate")
+        self.assertEqual(negative, "negative via direct")
+
     def test_collect_exposes_prompt_fields_in_payload(self):
         nodes = _load_nodes_module()
 
