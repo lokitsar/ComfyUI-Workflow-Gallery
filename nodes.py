@@ -172,36 +172,6 @@ def _extract_prompts(prompt_graph: Any) -> tuple[str, str]:
     return positive, negative
 
 
-def _extract_prompts_from_workflow(workflow: Any) -> tuple[str, str]:
-    if not isinstance(workflow, dict):
-        return "", ""
-
-    nodes = workflow.get("nodes")
-    if not isinstance(nodes, list):
-        return "", ""
-
-    texts: list[str] = []
-    for node in nodes:
-        if not isinstance(node, dict):
-            continue
-        node_type = str(node.get("type", ""))
-        if "TextEncode" not in node_type:
-            continue
-        widgets = node.get("widgets_values")
-        if not isinstance(widgets, list):
-            continue
-        text = next((item.strip() for item in widgets if isinstance(item, str) and item.strip()), "")
-        if text:
-            texts.append(text)
-
-    if not texts:
-        return "", ""
-
-    positive = texts[0]
-    negative = texts[1] if len(texts) > 1 else ""
-    return positive, negative
-
-
 def _extract_prompts_with_fallback(prompt_graph: Any, extra_pnginfo: Any) -> tuple[str, str]:
     positive, negative = _extract_prompts(prompt_graph)
     if positive:
@@ -215,11 +185,6 @@ def _extract_prompts_with_fallback(prompt_graph: Any, extra_pnginfo: Any) -> tup
         fallback_positive, fallback_negative = _extract_prompts(embedded_prompt)
         if fallback_positive:
             return fallback_positive, fallback_negative
-
-    workflow = extra_pnginfo.get("workflow")
-    fallback_positive, fallback_negative = _extract_prompts_from_workflow(workflow)
-    if fallback_positive:
-        return fallback_positive, fallback_negative
 
     return positive, negative
 

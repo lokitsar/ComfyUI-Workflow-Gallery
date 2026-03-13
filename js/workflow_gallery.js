@@ -48,7 +48,7 @@ function ensureStyles() {
     .wg-prompt-actions button { cursor:pointer; }
     .wg-prompt-text { margin-top:6px; font-size:11px; line-height:1.3; white-space:pre-wrap; max-height:140px; overflow:auto; border:1px solid rgba(255,255,255,0.12); border-radius:6px; padding:6px; }
     .wg-gallery { flex:1 1 auto; min-height:0; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; overscroll-behavior:contain; }
-    .wg-root.viewer-mode .wg-gallery, .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-meta { display:none; }
+    .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-meta { display:none; }
     .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:0; }
     .wg-item { border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.18); cursor:pointer; }
     .wg-item img { display:block; width:100%; height:auto; }

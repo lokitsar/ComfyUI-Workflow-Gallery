@@ -185,7 +185,7 @@ class TestPruneCleanup(unittest.TestCase):
             payload = nodes._gallery_payload("node-extra-prompt")
             self.assertEqual(payload["entries"][0]["positive_prompt"], "fallback positive")
 
-    def test_collect_uses_workflow_fallback_when_prompt_graph_missing(self):
+    def test_collect_does_not_guess_prompt_from_workflow_widget_values(self):
         nodes = _load_nodes_module()
 
         with tempfile.TemporaryDirectory() as td:
@@ -208,8 +208,8 @@ class TestPruneCleanup(unittest.TestCase):
             )
 
             payload = nodes._gallery_payload("node-workflow-prompt")
-            self.assertEqual(payload["entries"][0]["positive_prompt"], "workflow positive text")
-            self.assertEqual(payload["entries"][0]["negative_prompt"], "workflow negative text")
+            self.assertEqual(payload["entries"][0]["positive_prompt"], "")
+            self.assertEqual(payload["entries"][0]["negative_prompt"], "")
 
     def test_prune_removes_full_and_thumb_files_and_index(self):
         nodes = _load_nodes_module()
