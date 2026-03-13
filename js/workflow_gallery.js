@@ -165,11 +165,7 @@ async function copyToClipboard(text) {
 
 function formatPromptForDisplay(entry) {
   const positive = (entry?.positive_prompt || "").trim();
-  const negative = (entry?.negative_prompt || "").trim();
-  const parts = [];
-  if (positive) parts.push(`Positive:\n${positive}`);
-  if (negative) parts.push(`Negative:\n${negative}`);
-  return parts.join("\n\n");
+  return positive ? `Positive:\n${positive}` : "";
 }
 
 
@@ -272,10 +268,9 @@ function attachDom(node) {
   const navRight = el("button", { type: "button", className: "wg-nav hidden", "aria-label": "Next image" }, ["›"]);
   const previewCaption = el("div", { className: "wg-preview-caption" }, [""]);
   const copyPromptBtn = el("button", { type: "button" }, ["Copy prompt"]);
-  const copyBothBtn = el("button", { type: "button" }, ["Copy + / -"]);
   const promptText = el("div", { className: "wg-prompt-text" }, [""]);
   const previewStage = el("div", { className: "wg-preview-stage" }, [el("div", { className: "wg-preview-lane wg-preview-lane-left" }, [navLeft]), el("div", { className: "wg-preview-img-wrap" }, [previewImg]), el("div", { className: "wg-preview-lane wg-preview-lane-right" }, [navRight])]);
-  const preview = el("div", { className: "wg-preview hidden" }, [previewStage, previewCaption, el("div", { className: "wg-prompt-actions" }, [copyPromptBtn, copyBothBtn]), promptText]);
+  const preview = el("div", { className: "wg-preview hidden" }, [previewStage, previewCaption, el("div", { className: "wg-prompt-actions" }, [copyPromptBtn]), promptText]);
   const gallery = el("div", { className: "wg-gallery" });
   const initialThumbSize = loadThumbSizePreference();
   const thumbSlider = el("input", {
@@ -305,13 +300,6 @@ function attachDom(node) {
     const entry = node.__wgState?.payload?.entries?.find((item) => item.id === node.__wgState?.selectedId);
     const ok = await copyToClipboard(entry?.positive_prompt || "");
     if (!ok) console.warn("Workflow Gallery copy prompt failed");
-  });
-
-  copyBothBtn.addEventListener("click", async (e) => {
-    e.preventDefault();
-    const entry = node.__wgState?.payload?.entries?.find((item) => item.id === node.__wgState?.selectedId);
-    const ok = await copyToClipboard(formatPromptForDisplay(entry));
-    if (!ok) console.warn("Workflow Gallery copy prompts failed");
   });
 
   const root = el("div", { className: "wg-root" }, [

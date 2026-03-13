@@ -172,6 +172,58 @@ def _extract_prompts(prompt_graph: Any) -> tuple[str, str]:
     return positive, negative
 
 
+def _extract_prompts_from_workflow(workflow: Any) -> tuple[str, str]:
+    if not isinstance(workflow, dict):
+        return "", ""
+
+    nodes = workflow.get("nodes")
+    if not isinstance(nodes, list):
+        return "", ""
+
+    texts: list[str] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_type = str(node.get("type", ""))
+        if "TextEncode" not in node_type:
+            continue
+        widgets = node.get("widgets_values")
+        if not isinstance(widgets, list):
+            continue
+        text = next((item.strip() for item in widgets if isinstance(item, str) and item.strip()), "")
+        if text:
+            texts.append(text)
+
+    if not texts:
+        return "", ""
+
+    positive = texts[0]
+    negative = texts[1] if len(texts) > 1 else ""
+    return positive, negative
+
+
+def _extract_prompts_with_fallback(prompt_graph: Any, extra_pnginfo: Any) -> tuple[str, str]:
+    positive, negative = _extract_prompts(prompt_graph)
+    if positive:
+        return positive, negative
+
+    if not isinstance(extra_pnginfo, dict):
+        return positive, negative
+
+    embedded_prompt = extra_pnginfo.get("prompt")
+    if embedded_prompt is not None:
+        fallback_positive, fallback_negative = _extract_prompts(embedded_prompt)
+        if fallback_positive:
+            return fallback_positive, fallback_negative
+
+    workflow = extra_pnginfo.get("workflow")
+    fallback_positive, fallback_negative = _extract_prompts_from_workflow(workflow)
+    if fallback_positive:
+        return fallback_positive, fallback_negative
+
+    return positive, negative
+
+
 def _gallery_payload(node_id: str) -> Dict[str, Any]:
     with STATE_LOCK:
         state = GALLERY_STATE.get(node_id, {})
@@ -248,6 +300,7 @@ class WorkflowGallery:
             "hidden": {
                 "unique_id": "UNIQUE_ID",
                 "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
             },
         }
 
@@ -261,6 +314,7 @@ class WorkflowGallery:
         max_images: int = 48,
         unique_id: str | None = None,
         prompt: Dict[str, Any] | None = None,
+        extra_pnginfo: Dict[str, Any] | None = None,
     ):
         node_id = str(unique_id or "unknown")
         max_images = _safe_int(max_images, 48, 1, 500)
@@ -275,7 +329,7 @@ class WorkflowGallery:
 
         safe_prefix = _sanitize_prefix(filename_prefix)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        positive_prompt, negative_prompt = _extract_prompts(prompt)
+        positive_prompt, negative_prompt = _extract_prompts_with_fallback(prompt, extra_pnginfo)
 
         new_entries: List[Dict[str, Any]] = []
         for idx, image_tensor in enumerate(images):

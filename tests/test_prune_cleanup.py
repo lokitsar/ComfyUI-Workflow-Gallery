@@ -162,6 +162,55 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertEqual(payload["entries"][0]["positive_prompt"], "a robot in neon city")
             self.assertEqual(payload["entries"][0]["negative_prompt"], "")
 
+    def test_collect_uses_extra_pnginfo_prompt_fallback(self):
+        nodes = _load_nodes_module()
+
+        with tempfile.TemporaryDirectory() as td:
+            output_dir = Path(td) / "out"
+            image = _FakeTensor(np.ones((8, 8, 3), dtype=np.float32))
+            embedded_prompt = {
+                "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "fallback positive"}},
+                "2": {"class_type": "KSampler", "inputs": {"positive": ["1", 0]}},
+            }
+
+            gallery = nodes.WorkflowGallery()
+            gallery.collect(
+                [image],
+                output_directory=str(output_dir),
+                unique_id="node-extra-prompt",
+                prompt=None,
+                extra_pnginfo={"prompt": embedded_prompt},
+            )
+
+            payload = nodes._gallery_payload("node-extra-prompt")
+            self.assertEqual(payload["entries"][0]["positive_prompt"], "fallback positive")
+
+    def test_collect_uses_workflow_fallback_when_prompt_graph_missing(self):
+        nodes = _load_nodes_module()
+
+        with tempfile.TemporaryDirectory() as td:
+            output_dir = Path(td) / "out"
+            image = _FakeTensor(np.ones((8, 8, 3), dtype=np.float32))
+            workflow = {
+                "nodes": [
+                    {"type": "CLIPTextEncode", "widgets_values": ["workflow positive text"]},
+                    {"type": "CLIPTextEncode", "widgets_values": ["workflow negative text"]},
+                ]
+            }
+
+            gallery = nodes.WorkflowGallery()
+            gallery.collect(
+                [image],
+                output_directory=str(output_dir),
+                unique_id="node-workflow-prompt",
+                prompt=None,
+                extra_pnginfo={"workflow": workflow},
+            )
+
+            payload = nodes._gallery_payload("node-workflow-prompt")
+            self.assertEqual(payload["entries"][0]["positive_prompt"], "workflow positive text")
+            self.assertEqual(payload["entries"][0]["negative_prompt"], "workflow negative text")
+
     def test_prune_removes_full_and_thumb_files_and_index(self):
         nodes = _load_nodes_module()
 
