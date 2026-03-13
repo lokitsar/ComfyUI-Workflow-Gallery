@@ -152,7 +152,12 @@ def _extract_prompts(prompt_graph: Any) -> tuple[str, str]:
         if not isinstance(node, dict):
             continue
         class_type = str(node.get("class_type", ""))
-        if class_type.startswith("KSampler"):
+        inputs = node.get("inputs", {})
+        if not isinstance(inputs, dict):
+            inputs = {}
+
+        has_sampler_links = ("positive" in inputs) or ("negative" in inputs)
+        if class_type.startswith("KSampler") or has_sampler_links:
             samplers.append({"key": str(node_key), "node": node})
 
     if not samplers:
@@ -169,6 +174,11 @@ def _extract_prompts(prompt_graph: Any) -> tuple[str, str]:
 
     positive = _resolve_text_from_ref(prompt_graph, inputs.get("positive"))
     negative = _resolve_text_from_ref(prompt_graph, inputs.get("negative"))
+
+    if not positive:
+        positive = _resolve_text_from_ref(prompt_graph, inputs.get("cond_pos"))
+    if not negative:
+        negative = _resolve_text_from_ref(prompt_graph, inputs.get("cond_neg"))
     return positive, negative
 
 

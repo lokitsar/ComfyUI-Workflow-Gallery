@@ -143,6 +143,20 @@ class TestPruneCleanup(unittest.TestCase):
         self.assertEqual(positive, "cinematic city skyline")
         self.assertEqual(negative, "low quality")
 
+    def test_extract_prompts_reads_non_ksampler_nodes_with_positive_negative_inputs(self):
+        nodes = _load_nodes_module()
+
+        prompt_graph = {
+            "100": {"class_type": "CLIPTextEncode", "inputs": {"text": "holiday halloween scene"}},
+            "101": {"class_type": "CLIPTextEncode", "inputs": {"text": "bad anatomy"}},
+            "102": {"class_type": "SamplerCustom", "inputs": {"positive": ["100", 0], "negative": ["101", 0]}},
+        }
+
+        positive, negative = nodes._extract_prompts(prompt_graph)
+
+        self.assertEqual(positive, "holiday halloween scene")
+        self.assertEqual(negative, "bad anatomy")
+
     def test_collect_exposes_prompt_fields_in_payload(self):
         nodes = _load_nodes_module()
 
