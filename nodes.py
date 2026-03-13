@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import threading
 import time
@@ -8,6 +9,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 from PIL import Image
+from PIL.PngImagePlugin import PngInfo
 from aiohttp import web
 from server import PromptServer
 
@@ -18,12 +20,10 @@ STATE_LOCK = threading.Lock()
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-
 COMFY_ROOT_DIR = PACKAGE_DIR.parents[2] if len(PACKAGE_DIR.parents) >= 3 else PACKAGE_DIR
 DEFAULT_SAVE_DIR = COMFY_ROOT_DIR / "output"
 LEGACY_SAVE_DIR = PACKAGE_DIR / "gallery_output"
 CACHE_BASE_DIR = DEFAULT_SAVE_DIR / "Workflow-Gallery"
-
 DEFAULT_SAVE_DIR.mkdir(parents=True, exist_ok=True)
 CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -54,23 +54,7 @@ def _resolve_output_dir(raw_path: str) -> Path:
     if not raw_path:
         return DEFAULT_SAVE_DIR
     expanded = Path(os.path.expandvars(os.path.expanduser(raw_path)))
-    return expanded if expanded.is_absolute() else (COMFYUI_DIR / expanded).resolve()
-
-
-def _normalize_output_dir(raw_path: str) -> Path:
-    resolved = _resolve_output_dir(raw_path).resolve()
-    legacy = LEGACY_SAVE_DIR.resolve()
-    if os.path.normcase(str(resolved)) == os.path.normcase(str(legacy)):
-        return DEFAULT_SAVE_DIR
-    return resolved
-
-
-def _normalize_output_dir(raw_path: str) -> Path:
-    resolved = _resolve_output_dir(raw_path).resolve()
-    legacy = LEGACY_SAVE_DIR.resolve()
-    if os.path.normcase(str(resolved)) == os.path.normcase(str(legacy)):
-        return DEFAULT_SAVE_DIR
-    return resolved
+    return expanded if expanded.is_absolute() else (PACKAGE_DIR / expanded).resolve()
 
 
 def _normalize_output_dir(raw_path: str) -> Path:
@@ -102,10 +86,433 @@ def _entry_public(entry: Dict[str, Any]) -> Dict[str, Any]:
         "created": entry["created"],
         "width": entry["width"],
         "height": entry["height"],
+        "display_prompt": entry.get("display_prompt", entry.get("positive_prompt", "")),
+        "prompt_source": entry.get("prompt_source", "unavailable"),
+        "positive_prompt": entry.get("positive_prompt", ""),
+        "negative_prompt": entry.get("negative_prompt", ""),
         "full_url": f"/workflow_gallery/file/{entry['id']}?kind=full",
         "thumb_url": f"/workflow_gallery/file/{entry['id']}?kind=thumb",
     }
 
+
+def _get_ref_node_id(value: Any) -> str:
+    if isinstance(value, (list, tuple)) and value:
+        return str(value[0])
+    if isinstance(value, (str, int)):
+        return str(value)
+    return ""
+
+
+def _iter_child_node_ids(inputs: Dict[str, Any]) -> List[str]:
+    child_ids: List[str] = []
+    for child_value in inputs.values():
+        child_node_id = _get_ref_node_id(child_value)
+        if child_node_id:
+            child_ids.append(child_node_id)
+    return child_ids
+
+
+def _is_sampler_node(node: Dict[str, Any]) -> bool:
+    """Return True if this node looks like a KSampler or equivalent."""
+    class_type = str(node.get("class_type", ""))
+    inputs = node.get("inputs", {})
+    if not isinstance(inputs, dict):
+        inputs = {}
+    has_sampler_links = (
+        ("positive" in inputs)
+        or ("negative" in inputs)
+        or ("cond_pos" in inputs)
+        or ("cond_neg" in inputs)
+    )
+    return class_type.startswith("KSampler") or has_sampler_links
+
+
+def _find_relevant_sampler(prompt_graph: Dict[str, Any], gallery_node_id: str | None) -> Dict[str, Any] | None:
+    if not gallery_node_id:
+        return None
+
+    gallery_node = prompt_graph.get(str(gallery_node_id))
+    if not isinstance(gallery_node, dict):
+        return None
+
+    gallery_inputs = gallery_node.get("inputs", {})
+    if not isinstance(gallery_inputs, dict):
+        gallery_inputs = {}
+
+    start_node_id = _get_ref_node_id(gallery_inputs.get("images"))
+    if not start_node_id:
+        return None
+
+    # BFS upstream from the gallery's image input so we find the *closest*
+    # sampler to this specific gallery node, not just any sampler in the graph.
+    from collections import deque
+    queue: deque[str] = deque([start_node_id])
+    visited: set[str] = set()
+
+    while queue:
+        node_id = queue.popleft()
+        if not node_id or node_id in visited:
+            continue
+        visited.add(node_id)
+
+        node = prompt_graph.get(node_id)
+        if not isinstance(node, dict):
+            continue
+
+        if _is_sampler_node(node):
+            return node
+
+        inputs = node.get("inputs", {})
+        if not isinstance(inputs, dict):
+            inputs = {}
+
+        # Prefer latent/image inputs first so we stay on the image pipeline path
+        preferred_input_order = ["samples", "latent", "latent_image", "images", "image"]
+        ordered_children: List[str] = []
+        for key in preferred_input_order:
+            child_id = _get_ref_node_id(inputs.get(key))
+            if child_id and child_id not in ordered_children:
+                ordered_children.append(child_id)
+        for child_id in _iter_child_node_ids(inputs):
+            if child_id not in ordered_children:
+                ordered_children.append(child_id)
+
+        for child_node_id in ordered_children:
+            if child_node_id not in visited:
+                queue.append(child_node_id)
+
+    return None
+
+def _resolve_text_from_ref(prompt_graph: Dict[str, Any], value: Any, visited: set[str] | None = None) -> str:
+    node_ref = ""
+    if isinstance(value, (list, tuple)) and value:
+        node_ref = str(value[0])
+    elif isinstance(value, (str, int)):
+        node_ref = str(value)
+
+    if not node_ref:
+        return ""
+
+    if node_ref not in prompt_graph:
+        return ""
+
+    if visited is None:
+        visited = set()
+    if node_ref in visited:
+        return ""
+    current_visited = set(visited)
+    current_visited.add(node_ref)
+
+    node = prompt_graph.get(node_ref)
+    if not isinstance(node, dict):
+        return ""
+
+    class_type = str(node.get("class_type", ""))
+    inputs = node.get("inputs", {})
+    if not isinstance(inputs, dict):
+        inputs = {}
+
+    if "TextEncode" in class_type:
+        text_field_keys = ["text", "prompt", "text_g", "text_l", "clip_l", "clip_g", "t5xxl", "t5xxl_text"]
+        parts: List[str] = []
+        for key in text_field_keys:
+            field_value = inputs.get(key)
+            if field_value is None:
+                continue
+            if isinstance(field_value, str) and field_value.strip():
+                # Literal text directly in the field — use it as-is
+                parts.append(field_value.strip())
+            elif isinstance(field_value, (list, tuple)) and field_value:
+                # It's a node reference — follow it upstream to resolve the string.
+                # This handles wildcard nodes, string concatenators, primitive nodes, etc.
+                resolved = _resolve_text_from_ref(prompt_graph, field_value, current_visited)
+                if resolved:
+                    parts.append(resolved)
+        if parts:
+            unique_parts = list(dict.fromkeys(parts))
+            return "\n".join(unique_parts)
+
+    # For non-TextEncode nodes (e.g. wildcard node, string node, primitive),
+    # check common string output fields first before walking all children.
+    string_field_keys = ["text", "string", "value", "prompt", "output", "result", "wildcard_text", "populated_text"]
+    for key in string_field_keys:
+        field_value = inputs.get(key)
+        if isinstance(field_value, str) and field_value.strip():
+            return field_value.strip()
+
+    for child_value in inputs.values():
+        text = _resolve_text_from_ref(prompt_graph, child_value, current_visited)
+        if text:
+            return text
+    return ""
+
+
+def _extract_prompts(prompt_graph: Any, gallery_node_id: str | None = None) -> tuple[str, str]:
+    if not isinstance(prompt_graph, dict):
+        return "", ""
+
+    sampler = _find_relevant_sampler(prompt_graph, gallery_node_id)
+    if sampler is not None:
+        inputs = sampler.get("inputs", {})
+        if not isinstance(inputs, dict):
+            inputs = {}
+
+        positive = _resolve_text_from_ref(prompt_graph, inputs.get("positive"))
+        negative = _resolve_text_from_ref(prompt_graph, inputs.get("negative"))
+        if not positive:
+            positive = _resolve_text_from_ref(prompt_graph, inputs.get("cond_pos"))
+        if not negative:
+            negative = _resolve_text_from_ref(prompt_graph, inputs.get("cond_neg"))
+        if positive:
+            return positive, negative
+
+    samplers: list[dict[str, Any]] = []
+    for node_key, node in prompt_graph.items():
+        if not isinstance(node, dict):
+            continue
+        class_type = str(node.get("class_type", ""))
+        inputs = node.get("inputs", {})
+        if not isinstance(inputs, dict):
+            inputs = {}
+
+        has_sampler_links = ("positive" in inputs) or ("negative" in inputs)
+        if class_type.startswith("KSampler") or has_sampler_links:
+            samplers.append({"key": str(node_key), "node": node})
+
+    if not samplers:
+        return "", ""
+
+    def _sort_key(item: dict[str, Any]) -> tuple[int, str]:
+        key = item["key"]
+        return (0, key) if key.isdigit() else (1, key)
+
+    sampler = sorted(samplers, key=_sort_key)[0]["node"]
+    inputs = sampler.get("inputs", {})
+    if not isinstance(inputs, dict):
+        return "", ""
+
+    positive = _resolve_text_from_ref(prompt_graph, inputs.get("positive"))
+    negative = _resolve_text_from_ref(prompt_graph, inputs.get("negative"))
+
+    if not positive:
+        positive = _resolve_text_from_ref(prompt_graph, inputs.get("cond_pos"))
+    if not negative:
+        negative = _resolve_text_from_ref(prompt_graph, inputs.get("cond_neg"))
+    return positive, negative
+
+
+def _extract_prompts_with_fallback(prompt_graph: Any, extra_pnginfo: Any, gallery_node_id: str | None = None) -> tuple[str, str, str]:
+    # --- Primary: live workflow graph, walked from our specific gallery node ---
+    positive, negative = _extract_prompts(prompt_graph, gallery_node_id)
+    if positive:
+        return positive, negative, "workflow graph"
+
+    if not isinstance(extra_pnginfo, dict):
+        return positive, negative, "unavailable"
+
+    # --- Fallback 1: embedded prompt JSON (also scoped to gallery_node_id) ---
+    embedded_prompt = extra_pnginfo.get("prompt")
+    if embedded_prompt is not None:
+        fallback_positive, fallback_negative = _extract_prompts(embedded_prompt, gallery_node_id)
+        if fallback_positive:
+            return fallback_positive, fallback_negative, "embedded prompt metadata"
+        # If gallery_node_id scoped walk failed, try unscoped on embedded prompt
+        # but only as a last resort before the stale workflow fallback.
+        fallback_positive, fallback_negative = _extract_prompts(embedded_prompt, None)
+        if fallback_positive:
+            return fallback_positive, fallback_negative, "embedded prompt metadata"
+
+    # --- Fallback 2: embedded workflow JSON (LiteGraph format) ---
+    # Pass gallery_node_id so we resolve from the correct sampler, not just
+    # the first sampler in the graph (which caused the "random prompt" bug).
+    fallback_positive, fallback_negative = _extract_prompts_from_workflow(
+        extra_pnginfo.get("workflow"), gallery_node_id
+    )
+    if fallback_positive:
+        return fallback_positive, fallback_negative, "embedded workflow metadata"
+
+    return positive, negative, "unavailable"
+
+
+def _extract_prompt_text_from_workflow_node(node: Dict[str, Any]) -> str:
+    node_type = str(node.get("type", ""))
+    if "TextEncode" not in node_type:
+        return ""
+
+    widgets = node.get("widgets_values")
+    if not isinstance(widgets, list):
+        return ""
+
+    parts = [item.strip() for item in widgets if isinstance(item, str) and item.strip()]
+    if not parts:
+        return ""
+    return "\n".join(list(dict.fromkeys(parts)))
+
+
+def _extract_prompts_from_workflow(workflow: Any, gallery_node_id: str | None = None) -> tuple[str, str]:
+    if not isinstance(workflow, dict):
+        return "", ""
+
+    nodes = workflow.get("nodes")
+    links = workflow.get("links")
+    if not isinstance(nodes, list) or not isinstance(links, list):
+        return "", ""
+
+    node_by_id: Dict[str, Dict[str, Any]] = {}
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = node.get("id")
+        if node_id is None:
+            continue
+        node_by_id[str(node_id)] = node
+
+    link_to_from: Dict[int, str] = {}
+    for link in links:
+        if not isinstance(link, list) or len(link) < 2:
+            continue
+        link_id, from_node_id = link[0], link[1]
+        if isinstance(link_id, int):
+            link_to_from[link_id] = str(from_node_id)
+
+    def resolve_from_node_id(node_id: str, visited: set[str]) -> str:
+        if node_id in visited:
+            return ""
+        visited_next = set(visited)
+        visited_next.add(node_id)
+
+        node = node_by_id.get(node_id)
+        if not isinstance(node, dict):
+            return ""
+
+        text = _extract_prompt_text_from_workflow_node(node)
+        if text:
+            return text
+
+        inputs = node.get("inputs")
+        if not isinstance(inputs, list):
+            return ""
+
+        for input_def in inputs:
+            if not isinstance(input_def, dict):
+                continue
+            link_id = input_def.get("link")
+            if not isinstance(link_id, int):
+                continue
+            upstream_id = link_to_from.get(link_id)
+            if not upstream_id:
+                continue
+            text = resolve_from_node_id(upstream_id, visited_next)
+            if text:
+                return text
+        return ""
+
+    sampler_candidates: list[dict[str, Any]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, list):
+            continue
+        names = {str(item.get("name", "")).lower() for item in inputs if isinstance(item, dict)}
+        if {"positive", "negative"}.intersection(names) or {"cond_pos", "cond_neg"}.intersection(names):
+            sampler_candidates.append(node)
+
+    # If we know which gallery node to scope to, find the sampler that feeds it
+    # by walking upstream through the LiteGraph link map.
+    if gallery_node_id and sampler_candidates:
+        gallery_wf_node = node_by_id.get(str(gallery_node_id))
+        if isinstance(gallery_wf_node, dict):
+            gallery_inputs_list = gallery_wf_node.get("inputs")
+            if isinstance(gallery_inputs_list, list):
+                # Find the link id connected to the "images" input of the gallery node
+                images_link_id = None
+                for inp in gallery_inputs_list:
+                    if isinstance(inp, dict) and str(inp.get("name", "")).lower() == "images":
+                        images_link_id = inp.get("link")
+                        break
+                if isinstance(images_link_id, int):
+                    # BFS upstream from gallery's image input to find closest sampler
+                    from collections import deque as _deque
+                    upstream_start = link_to_from.get(images_link_id)
+                    if upstream_start:
+                        bfs_queue: _deque[str] = _deque([upstream_start])
+                        bfs_visited: set[str] = set()
+                        sampler_candidate_ids = {str(n.get("id", "")) for n in sampler_candidates}
+                        while bfs_queue:
+                            cur_id = bfs_queue.popleft()
+                            if not cur_id or cur_id in bfs_visited:
+                                continue
+                            bfs_visited.add(cur_id)
+                            if cur_id in sampler_candidate_ids:
+                                # Found the closest sampler upstream — use it exclusively
+                                sampler_candidates = [n for n in sampler_candidates if str(n.get("id", "")) == cur_id]
+                                break
+                            cur_node = node_by_id.get(cur_id)
+                            if not isinstance(cur_node, dict):
+                                continue
+                            cur_inputs = cur_node.get("inputs")
+                            if isinstance(cur_inputs, list):
+                                for inp in cur_inputs:
+                                    if isinstance(inp, dict):
+                                        lid = inp.get("link")
+                                        if isinstance(lid, int):
+                                            nxt = link_to_from.get(lid)
+                                            if nxt and nxt not in bfs_visited:
+                                                bfs_queue.append(nxt)
+
+    def sort_key(node: Dict[str, Any]) -> tuple[int, str]:
+        node_id = str(node.get("id", ""))
+        return (0, node_id) if node_id.isdigit() else (1, node_id)
+
+    for sampler in sorted(sampler_candidates, key=sort_key):
+        inputs = sampler.get("inputs")
+        if not isinstance(inputs, list):
+            continue
+
+        by_name = {str(item.get("name", "")).lower(): item for item in inputs if isinstance(item, dict)}
+
+        def resolve_input(*names: str) -> str:
+            for name in names:
+                input_def = by_name.get(name)
+                if not isinstance(input_def, dict):
+                    continue
+                link_id = input_def.get("link")
+                if not isinstance(link_id, int):
+                    continue
+                upstream_id = link_to_from.get(link_id)
+                if not upstream_id:
+                    continue
+                text = resolve_from_node_id(upstream_id, set())
+                if text:
+                    return text
+            return ""
+
+        positive = resolve_input("positive", "cond_pos")
+        negative = resolve_input("negative", "cond_neg")
+        if positive:
+            return positive, negative
+
+    return "", ""
+
+
+def _build_pnginfo(prompt: Any, extra_pnginfo: Any) -> PngInfo:
+    pnginfo = PngInfo()
+
+    if prompt is not None:
+        try:
+            pnginfo.add_text("prompt", json.dumps(prompt, ensure_ascii=False))
+        except Exception:
+            pass
+
+    if isinstance(extra_pnginfo, dict):
+        for key, value in extra_pnginfo.items():
+            try:
+                pnginfo.add_text(str(key), json.dumps(value, ensure_ascii=False))
+            except Exception:
+                pass
+
+    return pnginfo
 
 def _gallery_payload(node_id: str) -> Dict[str, Any]:
     with STATE_LOCK:
@@ -182,6 +589,8 @@ class WorkflowGallery:
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
             },
         }
 
@@ -194,6 +603,8 @@ class WorkflowGallery:
         filename_prefix: str = "workflow_gallery",
         max_images: int = 48,
         unique_id: str | None = None,
+        prompt: Dict[str, Any] | None = None,
+        extra_pnginfo: Dict[str, Any] | None = None,
     ):
         node_id = str(unique_id or "unknown")
         max_images = _safe_int(max_images, 48, 1, 500)
@@ -208,6 +619,9 @@ class WorkflowGallery:
 
         safe_prefix = _sanitize_prefix(filename_prefix)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
+        positive_prompt, negative_prompt, prompt_source = _extract_prompts_with_fallback(prompt, extra_pnginfo, node_id)
+        display_prompt = positive_prompt
+        pnginfo = _build_pnginfo(prompt, extra_pnginfo)
 
         new_entries: List[Dict[str, Any]] = []
         for idx, image_tensor in enumerate(images):
@@ -218,13 +632,13 @@ class WorkflowGallery:
             full_path = resolved_output_dir / filename
 
             if save_to_disk:
-                pil_image.save(full_path, format="PNG", compress_level=4)
+                pil_image.save(full_path, format="PNG", compress_level=4, pnginfo=pnginfo)
             else:
                 # Still save to a temp-ish package folder so the frontend can display original-size images.
                 temp_dir = CACHE_BASE_DIR / "unsaved_cache"
                 temp_dir.mkdir(parents=True, exist_ok=True)
                 full_path = temp_dir / filename
-                pil_image.save(full_path, format="PNG", compress_level=4)
+                pil_image.save(full_path, format="PNG", compress_level=4, pnginfo=pnginfo)
 
             thumb_path = CACHE_BASE_DIR / "thumb_cache" / f"{entry_id}.webp"
             thumb_path.parent.mkdir(parents=True, exist_ok=True)
@@ -237,6 +651,10 @@ class WorkflowGallery:
                     "created": int(time.time()),
                     "width": width,
                     "height": height,
+                    "display_prompt": display_prompt,
+                    "prompt_source": prompt_source,
+                    "positive_prompt": positive_prompt,
+                    "negative_prompt": negative_prompt,
                     "full_path": str(full_path),
                     "thumb_path": str(thumb_path),
                 }

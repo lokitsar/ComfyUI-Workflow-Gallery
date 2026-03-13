@@ -30,7 +30,7 @@ function ensureStyles() {
   const style = document.createElement("style");
   style.id = "workflow-gallery-styles";
   style.textContent = `
-    .wg-root { display:flex; flex-direction:column; gap:8px; padding:8px; box-sizing:border-box; width:100%; min-width:0; min-height:0; height:100%; overflow:hidden; }
+    .wg-root { display:flex; flex-direction:column; gap:8px; padding:8px; box-sizing:border-box; width:100%; min-width:0; min-height:0; height:100%; overflow:auto; }
     .wg-topbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
     .wg-topbar button { cursor:pointer; }
     .wg-count { margin-left:auto; opacity:0.85; font-size:12px; }
@@ -44,6 +44,9 @@ function ensureStyles() {
     .wg-nav:hover { background:rgba(255,255,255,0.12); }
     .wg-nav.hidden { visibility:hidden; pointer-events:none; opacity:0; }
     .wg-preview-caption { padding-top:6px; font-size:11px; line-height:1.25; word-break:break-word; opacity:0.9; text-align:center; }
+    .wg-prompt-actions { display:flex; gap:6px; justify-content:center; margin-top:6px; }
+    .wg-prompt-actions button { cursor:pointer; }
+    .wg-prompt-text { margin-top:6px; font-size:11px; line-height:1.3; white-space:pre-wrap; max-height:140px; overflow:auto; border:1px solid rgba(255,255,255,0.12); border-radius:6px; padding:6px; }
     .wg-gallery { flex:1 1 auto; min-height:0; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; overscroll-behavior:contain; }
     .wg-root.viewer-mode .wg-gallery, .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-meta { display:none; }
     .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:0; }
@@ -100,8 +103,6 @@ function saveThumbSizePreference(value) {
 function layoutGrid(galleryEl, thumbSize) {
   const size = clampThumbSize(thumbSize);
   galleryEl.style.gridTemplateColumns = `repeat(auto-fill, minmax(${size}px, 1fr))`;
-  galleryEl.style.gridTemplateColumns = `repeat(auto-fill, ${size}px)`;
-
 }
 
 function getDisplayEntries(payload) {
@@ -116,6 +117,7 @@ function closeViewer(node) {
   state.preview.classList.add("hidden");
   state.previewImg.removeAttribute("src");
   state.previewCaption.textContent = "";
+  state.promptText.textContent = "";
   renderGallery(node, state.payload || { entries: [] });
   node.setDirtyCanvas(true, true);
 }
@@ -142,6 +144,55 @@ function updateNavButtons(state, entries) {
   state.navRight.classList.toggle('hidden', atEnd);
 }
 
+async function copyToClipboard(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(area);
+    return ok;
+  }
+}
+
+function getPromptValue(entry) {
+  return String(entry?.display_prompt || entry?.positive_prompt || "").trim();
+}
+
+function getNegativePromptValue(entry) {
+  return String(entry?.negative_prompt || "").trim();
+}
+
+function getPromptSource(entry) {
+  return String(entry?.prompt_source || "unavailable").trim();
+}
+
+function formatPromptForDisplay(entry) {
+  const positive = getPromptValue(entry);
+  const negative = getNegativePromptValue(entry);
+  if (!positive && !negative) return "";
+  if (positive && negative) return `[Positive]\n${positive}\n\n[Negative]\n${negative}`;
+  if (positive) return positive;
+  return `[Negative]\n${negative}`;
+}
+
+function formatTooltip(entry) {
+  const positive = getPromptValue(entry);
+  const negative = getNegativePromptValue(entry);
+  const parts = [];
+  if (positive) parts.push(`Positive: ${positive}`);
+  if (negative) parts.push(`Negative: ${negative}`);
+  return parts.join("\n\n");
+}
+
 
 function renderGallery(node, payload) {
   const state = node.__wgState;
@@ -161,6 +212,7 @@ function renderGallery(node, payload) {
     state.preview.classList.add("hidden");
     state.previewImg.removeAttribute("src");
     state.previewCaption.textContent = "";
+    state.promptText.textContent = "";
     state.gallery.appendChild(el("div", { className: "wg-empty" }, ["Gallery is empty. Queue an image batch through this node."]));
     return;
   }
@@ -175,6 +227,12 @@ function renderGallery(node, payload) {
     const selected = entry.id === state.selectedId;
     const item = el("div", { className: `wg-item${selected ? " selected" : ""}` });
     const img = el("img", { src: entry.thumb_url, loading: "lazy", alt: entry.filename });
+    const promptPreview = formatPromptForDisplay(entry);
+    const tooltipText = formatTooltip(entry);
+    if (tooltipText) {
+      item.title = tooltipText;
+      img.title = tooltipText;
+    }
     const caption = el("div", { className: "wg-caption" }, [`${entry.filename}
 ${entry.width}×${entry.height}`]);
 
@@ -187,6 +245,7 @@ ${entry.width}×${entry.height}`]);
         state.preview.classList.add("hidden");
         state.previewImg.removeAttribute("src");
         state.previewCaption.textContent = "";
+        state.promptText.textContent = "";
       } else {
         state.selectedId = entry.id;
         state.root.classList.add("viewer-mode");
@@ -194,6 +253,7 @@ ${entry.width}×${entry.height}`]);
         state.previewImg.src = entry.full_url;
         state.previewImg.alt = entry.filename;
         state.previewCaption.textContent = `${entry.filename} • ${entry.width}×${entry.height}`;
+        state.promptText.textContent = promptPreview || "No prompt metadata found for this image.";
       }
       renderGallery(node, state.payload || payload);
       node.setDirtyCanvas(true, true);
@@ -210,6 +270,10 @@ ${entry.width}×${entry.height}`]);
       state.previewImg.src = active.full_url;
       state.previewImg.alt = active.filename;
       state.previewCaption.textContent = `${active.filename} • ${active.width}×${active.height}`;
+      {
+        const promptPreview = formatPromptForDisplay(active);
+        state.promptText.textContent = promptPreview || "No prompt metadata found for this image.";
+      }
       updateNavButtons(state, entries);
     }
   } else {
@@ -217,6 +281,7 @@ ${entry.width}×${entry.height}`]);
     state.preview.classList.add("hidden");
     state.previewImg.removeAttribute("src");
     state.previewCaption.textContent = "";
+    state.promptText.textContent = "";
     updateNavButtons(state, entries);
   }
 }
@@ -231,8 +296,10 @@ function attachDom(node) {
   const navLeft = el("button", { type: "button", className: "wg-nav hidden", "aria-label": "Previous image" }, ["‹"]);
   const navRight = el("button", { type: "button", className: "wg-nav hidden", "aria-label": "Next image" }, ["›"]);
   const previewCaption = el("div", { className: "wg-preview-caption" }, [""]);
+  const copyPromptBtn = el("button", { type: "button" }, ["Copy prompt"]);
+  const promptText = el("div", { className: "wg-prompt-text" }, [""]);
   const previewStage = el("div", { className: "wg-preview-stage" }, [el("div", { className: "wg-preview-lane wg-preview-lane-left" }, [navLeft]), el("div", { className: "wg-preview-img-wrap" }, [previewImg]), el("div", { className: "wg-preview-lane wg-preview-lane-right" }, [navRight])]);
-  const preview = el("div", { className: "wg-preview hidden" }, [previewStage, previewCaption]);
+  const preview = el("div", { className: "wg-preview hidden" }, [previewStage, previewCaption, el("div", { className: "wg-prompt-actions" }, [copyPromptBtn]), promptText]);
   const gallery = el("div", { className: "wg-gallery" });
   const initialThumbSize = loadThumbSizePreference();
   const thumbSlider = el("input", {
@@ -257,6 +324,19 @@ function attachDom(node) {
     navigateViewer(node, 1);
   });
 
+  copyPromptBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const entry = node.__wgState?.payload?.entries?.find((item) => item.id === node.__wgState?.selectedId);
+    const ok = await copyToClipboard(getPromptValue(entry));
+    if (ok) {
+      const prev = copyPromptBtn.textContent;
+      copyPromptBtn.textContent = "Copied!";
+      setTimeout(() => { copyPromptBtn.textContent = prev; }, 1500);
+    } else {
+      console.warn("Workflow Gallery copy prompt failed");
+    }
+  });
+
   const root = el("div", { className: "wg-root" }, [
     el("div", { className: "wg-topbar" }, [clearBtn, refreshBtn, count]),
     preview,
@@ -266,7 +346,7 @@ function attachDom(node) {
     el("div", { className: "wg-meta", style: { fontSize: "11px", opacity: "0.8", wordBreak: "break-all", display: "grid", gap: "2px" } }, [saveMode, dir]),
   ]);
 
-  node.__wgState = { root, clearBtn, refreshBtn, count, preview, previewStage, previewImg, previewCaption, navLeft, navRight, gallery, thumbSlider, saveMode, dir, selectedId: null, payload: null };
+  node.__wgState = { root, clearBtn, refreshBtn, count, preview, previewStage, previewImg, previewCaption, promptText, navLeft, navRight, gallery, thumbSlider, saveMode, dir, selectedId: null, payload: null };
 
   const applyThumbSizePreference = () => {
     const size = clampThumbSize(thumbSlider.value);
@@ -313,10 +393,7 @@ function attachDom(node) {
   if (domWidget?.element?.style) {
     domWidget.element.style.width = "100%";
     domWidget.element.style.height = "100%";
-    domWidget.element.style.maxHeight = "100%";
     domWidget.element.style.display = "block";
-    domWidget.element.style.overflow = "auto";
-    domWidget.element.style.minWidth = "0";
   }
 
   node.size = [Math.max(node.size?.[0] || 0, 420), Math.max(node.size?.[1] || 0, 900)];
