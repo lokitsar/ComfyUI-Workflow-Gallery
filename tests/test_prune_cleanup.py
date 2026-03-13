@@ -76,6 +76,24 @@ class TestPruneCleanup(unittest.TestCase):
         self.assertEqual(positive, "a cinematic portrait")
         self.assertEqual(negative, "low quality, blurry")
 
+    def test_extract_prompts_ignores_non_prompt_string_inputs(self):
+        nodes = _load_nodes_module()
+
+        prompt_graph = {
+            "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "actual positive prompt"}},
+            "2": {
+                "class_type": "ConditioningSetTimestepRange",
+                "inputs": {"conditioning": ["1", 0], "start": 0.0, "end": 0.3, "label": "noise on beginning steps"},
+            },
+            "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "actual negative prompt"}},
+            "4": {"class_type": "KSampler", "inputs": {"positive": ["2", 0], "negative": ["3", 0]}},
+        }
+
+        positive, negative = nodes._extract_prompts(prompt_graph)
+
+        self.assertEqual(positive, "actual positive prompt")
+        self.assertEqual(negative, "actual negative prompt")
+
     def test_collect_exposes_prompt_fields_in_payload(self):
         nodes = _load_nodes_module()
 

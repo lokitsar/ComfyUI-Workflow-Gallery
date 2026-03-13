@@ -92,9 +92,6 @@ def _entry_public(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _resolve_text_from_ref(prompt_graph: Dict[str, Any], value: Any, visited: set[str] | None = None) -> str:
-    if isinstance(value, str):
-        return value.strip()
-
     if not isinstance(value, (list, tuple)) or not value:
         return ""
 
@@ -119,6 +116,8 @@ def _resolve_text_from_ref(prompt_graph: Dict[str, Any], value: Any, visited: se
         return text.strip() if isinstance(text, str) else ""
 
     for child_value in inputs.values():
+        if not isinstance(child_value, (list, tuple)):
+            continue
         text = _resolve_text_from_ref(prompt_graph, child_value, visited)
         if text:
             return text
