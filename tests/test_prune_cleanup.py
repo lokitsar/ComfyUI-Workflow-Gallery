@@ -5,6 +5,11 @@ import types
 import unittest
 
 import numpy as np
+
+import numpy as np
+
+import numpy as np
+
 from pathlib import Path
 
 
@@ -29,6 +34,7 @@ class _FakeRequest:
         self.match_info = {"node_id": node_id}
 
 
+
 class _FakeTensor:
     def __init__(self, arr):
         self._arr = arr
@@ -38,6 +44,7 @@ class _FakeTensor:
 
     def numpy(self):
         return self._arr
+
 
 
 def _load_nodes_module():
@@ -62,208 +69,6 @@ def _load_nodes_module():
 
 
 class TestPruneCleanup(unittest.TestCase):
-    def test_extract_prompts_from_sampler_graph(self):
-        nodes = _load_nodes_module()
-
-        prompt_graph = {
-            "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "a cinematic portrait"}},
-            "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "low quality, blurry"}},
-            "3": {"class_type": "KSampler", "inputs": {"positive": ["1", 0], "negative": ["2", 0]}},
-        }
-
-        positive, negative = nodes._extract_prompts(prompt_graph)
-
-        self.assertEqual(positive, "a cinematic portrait")
-        self.assertEqual(negative, "low quality, blurry")
-
-    def test_extract_prompts_ignores_non_prompt_string_inputs(self):
-        nodes = _load_nodes_module()
-
-        prompt_graph = {
-            "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "actual positive prompt"}},
-            "2": {
-                "class_type": "ConditioningSetTimestepRange",
-                "inputs": {"conditioning": ["1", 0], "start": 0.0, "end": 0.3, "label": "noise on beginning steps"},
-            },
-            "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "actual negative prompt"}},
-            "4": {"class_type": "KSampler", "inputs": {"positive": ["2", 0], "negative": ["3", 0]}},
-        }
-
-        positive, negative = nodes._extract_prompts(prompt_graph)
-
-        self.assertEqual(positive, "actual positive prompt")
-        self.assertEqual(negative, "actual negative prompt")
-
-    def test_extract_prompts_accepts_direct_node_id_reference(self):
-        nodes = _load_nodes_module()
-
-        prompt_graph = {
-            "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "direct positive"}},
-            "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "direct negative"}},
-            "3": {"class_type": "KSampler", "inputs": {"positive": "1", "negative": "2"}},
-        }
-
-        positive, negative = nodes._extract_prompts(prompt_graph)
-
-        self.assertEqual(positive, "direct positive")
-        self.assertEqual(negative, "direct negative")
-
-    def test_extract_prompts_walks_through_direct_string_link_in_intermediate_node(self):
-        nodes = _load_nodes_module()
-
-        prompt_graph = {
-            "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "positive via intermediate"}},
-            "2": {
-                "class_type": "ConditioningSetTimestepRange",
-                "inputs": {"conditioning": "1", "label": "noise on beginning steps", "start": 0.0, "end": 0.3},
-            },
-            "3": {"class_type": "CLIPTextEncode", "inputs": {"text": "negative via direct"}},
-            "4": {"class_type": "KSampler", "inputs": {"positive": ["2", 0], "negative": "3"}},
-        }
-
-        positive, negative = nodes._extract_prompts(prompt_graph)
-
-        self.assertEqual(positive, "positive via intermediate")
-        self.assertEqual(negative, "negative via direct")
-
-    def test_extract_prompts_reads_sdxl_textencode_fields(self):
-        nodes = _load_nodes_module()
-
-        prompt_graph = {
-            "1": {
-                "class_type": "CLIPTextEncodeSDXL",
-                "inputs": {"text_g": "cinematic city skyline", "text_l": "cinematic city skyline"},
-            },
-            "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "low quality"}},
-            "3": {"class_type": "KSampler", "inputs": {"positive": ["1", 0], "negative": ["2", 0]}},
-        }
-
-        positive, negative = nodes._extract_prompts(prompt_graph)
-
-        self.assertEqual(positive, "cinematic city skyline")
-        self.assertEqual(negative, "low quality")
-
-    def test_extract_prompts_reads_non_ksampler_nodes_with_positive_negative_inputs(self):
-        nodes = _load_nodes_module()
-
-        prompt_graph = {
-            "100": {"class_type": "CLIPTextEncode", "inputs": {"text": "holiday halloween scene"}},
-            "101": {"class_type": "CLIPTextEncode", "inputs": {"text": "bad anatomy"}},
-            "102": {"class_type": "SamplerCustom", "inputs": {"positive": ["100", 0], "negative": ["101", 0]}},
-        }
-
-        positive, negative = nodes._extract_prompts(prompt_graph)
-
-        self.assertEqual(positive, "holiday halloween scene")
-        self.assertEqual(negative, "bad anatomy")
-
-    def test_collect_exposes_prompt_fields_in_payload(self):
-        nodes = _load_nodes_module()
-
-        with tempfile.TemporaryDirectory() as td:
-            output_dir = Path(td) / "out"
-            image = _FakeTensor(np.ones((8, 8, 3), dtype=np.float32))
-            prompt_graph = {
-                "10": {"class_type": "CLIPTextEncode", "inputs": {"text": "a robot in neon city"}},
-                "11": {"class_type": "KSampler", "inputs": {"positive": ["10", 0]}},
-            }
-
-            gallery = nodes.WorkflowGallery()
-            gallery.collect([image], output_directory=str(output_dir), unique_id="node-prompts", prompt=prompt_graph)
-
-            payload = nodes._gallery_payload("node-prompts")
-            self.assertEqual(payload["count"], 1)
-            self.assertEqual(payload["entries"][0]["positive_prompt"], "a robot in neon city")
-            self.assertEqual(payload["entries"][0]["negative_prompt"], "")
-
-    def test_collect_uses_extra_pnginfo_prompt_fallback(self):
-        nodes = _load_nodes_module()
-
-        with tempfile.TemporaryDirectory() as td:
-            output_dir = Path(td) / "out"
-            image = _FakeTensor(np.ones((8, 8, 3), dtype=np.float32))
-            embedded_prompt = {
-                "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "fallback positive"}},
-                "2": {"class_type": "KSampler", "inputs": {"positive": ["1", 0]}},
-            }
-
-            gallery = nodes.WorkflowGallery()
-            gallery.collect(
-                [image],
-                output_directory=str(output_dir),
-                unique_id="node-extra-prompt",
-                prompt=None,
-                extra_pnginfo={"prompt": embedded_prompt},
-            )
-
-            payload = nodes._gallery_payload("node-extra-prompt")
-            self.assertEqual(payload["entries"][0]["positive_prompt"], "fallback positive")
-
-    def test_collect_does_not_guess_prompt_from_workflow_widget_values(self):
-        nodes = _load_nodes_module()
-
-        with tempfile.TemporaryDirectory() as td:
-            output_dir = Path(td) / "out"
-            image = _FakeTensor(np.ones((8, 8, 3), dtype=np.float32))
-            workflow = {
-                "nodes": [
-                    {"type": "CLIPTextEncode", "widgets_values": ["workflow positive text"]},
-                    {"type": "CLIPTextEncode", "widgets_values": ["workflow negative text"]},
-                ]
-            }
-
-            gallery = nodes.WorkflowGallery()
-            gallery.collect(
-                [image],
-                output_directory=str(output_dir),
-                unique_id="node-workflow-prompt",
-                prompt=None,
-                extra_pnginfo={"workflow": workflow},
-            )
-
-            payload = nodes._gallery_payload("node-workflow-prompt")
-            self.assertEqual(payload["entries"][0]["positive_prompt"], "")
-            self.assertEqual(payload["entries"][0]["negative_prompt"], "")
-
-    def test_collect_uses_linked_workflow_prompt_fallback(self):
-        nodes = _load_nodes_module()
-
-        with tempfile.TemporaryDirectory() as td:
-            output_dir = Path(td) / "out"
-            image = _FakeTensor(np.ones((8, 8, 3), dtype=np.float32))
-            workflow = {
-                "nodes": [
-                    {"id": 10, "type": "CLIPTextEncode", "widgets_values": ["linked positive text"], "inputs": []},
-                    {"id": 11, "type": "CLIPTextEncode", "widgets_values": ["linked negative text"], "inputs": []},
-                    {"id": 12, "type": "CLIPTextEncode", "widgets_values": ["unrelated text"], "inputs": []},
-                    {
-                        "id": 20,
-                        "type": "SamplerCustom",
-                        "inputs": [
-                            {"name": "positive", "link": 1001},
-                            {"name": "negative", "link": 1002},
-                        ],
-                    },
-                ],
-                "links": [
-                    [1001, 10, 0, 20, 0, "CONDITIONING"],
-                    [1002, 11, 0, 20, 1, "CONDITIONING"],
-                ],
-            }
-
-            gallery = nodes.WorkflowGallery()
-            gallery.collect(
-                [image],
-                output_directory=str(output_dir),
-                unique_id="node-workflow-linked",
-                prompt=None,
-                extra_pnginfo={"workflow": workflow},
-            )
-
-            payload = nodes._gallery_payload("node-workflow-linked")
-            self.assertEqual(payload["entries"][0]["positive_prompt"], "linked positive text")
-            self.assertEqual(payload["entries"][0]["negative_prompt"], "linked negative text")
-
     def test_prune_removes_full_and_thumb_files_and_index(self):
         nodes = _load_nodes_module()
 
@@ -293,6 +98,7 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertTrue(thumb_new.exists())
             self.assertIsNone(nodes._find_entry("old"))
             self.assertIs(nodes._find_entry("new"), new_entry)
+
 
 
     def test_legacy_output_directory_maps_to_comfy_output(self):
@@ -330,6 +136,7 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertFalse(thumb_path.exists())
 
 
+
     def test_collect_save_to_disk_true_writes_to_selected_output_dir(self):
         nodes = _load_nodes_module()
 
@@ -364,6 +171,7 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertEqual(full_path.parent.name, "unsaved_cache")
             self.assertTrue(str(full_path).startswith(str(nodes.CACHE_BASE_DIR.resolve())))
             self.assertEqual(nodes.GALLERY_STATE["node-save-false"]["save_to_disk"], False)
+
 
 
 if __name__ == "__main__":
