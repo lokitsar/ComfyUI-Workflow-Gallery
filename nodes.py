@@ -196,7 +196,130 @@ def _extract_prompts_with_fallback(prompt_graph: Any, extra_pnginfo: Any) -> tup
         if fallback_positive:
             return fallback_positive, fallback_negative
 
+    fallback_positive, fallback_negative = _extract_prompts_from_workflow(extra_pnginfo.get("workflow"))
+    if fallback_positive:
+        return fallback_positive, fallback_negative
+
     return positive, negative
+
+
+def _extract_prompt_text_from_workflow_node(node: Dict[str, Any]) -> str:
+    node_type = str(node.get("type", ""))
+    if "TextEncode" not in node_type:
+        return ""
+
+    widgets = node.get("widgets_values")
+    if not isinstance(widgets, list):
+        return ""
+
+    parts = [item.strip() for item in widgets if isinstance(item, str) and item.strip()]
+    if not parts:
+        return ""
+    return "\n".join(list(dict.fromkeys(parts)))
+
+
+def _extract_prompts_from_workflow(workflow: Any) -> tuple[str, str]:
+    if not isinstance(workflow, dict):
+        return "", ""
+
+    nodes = workflow.get("nodes")
+    links = workflow.get("links")
+    if not isinstance(nodes, list) or not isinstance(links, list):
+        return "", ""
+
+    node_by_id: Dict[str, Dict[str, Any]] = {}
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        node_id = node.get("id")
+        if node_id is None:
+            continue
+        node_by_id[str(node_id)] = node
+
+    link_to_from: Dict[int, str] = {}
+    for link in links:
+        if not isinstance(link, list) or len(link) < 2:
+            continue
+        link_id, from_node_id = link[0], link[1]
+        if isinstance(link_id, int):
+            link_to_from[link_id] = str(from_node_id)
+
+    def resolve_from_node_id(node_id: str, visited: set[str]) -> str:
+        if node_id in visited:
+            return ""
+        visited_next = set(visited)
+        visited_next.add(node_id)
+
+        node = node_by_id.get(node_id)
+        if not isinstance(node, dict):
+            return ""
+
+        text = _extract_prompt_text_from_workflow_node(node)
+        if text:
+            return text
+
+        inputs = node.get("inputs")
+        if not isinstance(inputs, list):
+            return ""
+
+        for input_def in inputs:
+            if not isinstance(input_def, dict):
+                continue
+            link_id = input_def.get("link")
+            if not isinstance(link_id, int):
+                continue
+            upstream_id = link_to_from.get(link_id)
+            if not upstream_id:
+                continue
+            text = resolve_from_node_id(upstream_id, visited_next)
+            if text:
+                return text
+        return ""
+
+    sampler_candidates: list[dict[str, Any]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        inputs = node.get("inputs")
+        if not isinstance(inputs, list):
+            continue
+        names = {str(item.get("name", "")).lower() for item in inputs if isinstance(item, dict)}
+        if {"positive", "negative"}.intersection(names) or {"cond_pos", "cond_neg"}.intersection(names):
+            sampler_candidates.append(node)
+
+    def sort_key(node: Dict[str, Any]) -> tuple[int, str]:
+        node_id = str(node.get("id", ""))
+        return (0, node_id) if node_id.isdigit() else (1, node_id)
+
+    for sampler in sorted(sampler_candidates, key=sort_key):
+        inputs = sampler.get("inputs")
+        if not isinstance(inputs, list):
+            continue
+
+        by_name = {str(item.get("name", "")).lower(): item for item in inputs if isinstance(item, dict)}
+
+        def resolve_input(*names: str) -> str:
+            for name in names:
+                input_def = by_name.get(name)
+                if not isinstance(input_def, dict):
+                    continue
+                link_id = input_def.get("link")
+                if not isinstance(link_id, int):
+                    continue
+                upstream_id = link_to_from.get(link_id)
+                if not upstream_id:
+                    continue
+                text = resolve_from_node_id(upstream_id, set())
+                if text:
+                    return text
+            return ""
+
+        positive = resolve_input("positive", "cond_pos")
+        negative = resolve_input("negative", "cond_neg")
+        if positive:
+            return positive, negative
+
+    return "", ""
 
 
 def _gallery_payload(node_id: str) -> Dict[str, Any]:

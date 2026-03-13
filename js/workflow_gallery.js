@@ -30,7 +30,7 @@ function ensureStyles() {
   const style = document.createElement("style");
   style.id = "workflow-gallery-styles";
   style.textContent = `
-    .wg-root { display:flex; flex-direction:column; gap:8px; padding:8px; box-sizing:border-box; width:100%; min-width:0; min-height:0; height:100%; overflow:hidden; }
+    .wg-root { display:flex; flex-direction:column; gap:8px; padding:8px; box-sizing:border-box; width:100%; min-width:0; min-height:0; height:100%; overflow:auto; }
     .wg-topbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
     .wg-topbar button { cursor:pointer; }
     .wg-count { margin-left:auto; opacity:0.85; font-size:12px; }

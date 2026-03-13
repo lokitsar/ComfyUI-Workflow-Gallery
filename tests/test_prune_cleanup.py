@@ -225,6 +225,45 @@ class TestPruneCleanup(unittest.TestCase):
             self.assertEqual(payload["entries"][0]["positive_prompt"], "")
             self.assertEqual(payload["entries"][0]["negative_prompt"], "")
 
+    def test_collect_uses_linked_workflow_prompt_fallback(self):
+        nodes = _load_nodes_module()
+
+        with tempfile.TemporaryDirectory() as td:
+            output_dir = Path(td) / "out"
+            image = _FakeTensor(np.ones((8, 8, 3), dtype=np.float32))
+            workflow = {
+                "nodes": [
+                    {"id": 10, "type": "CLIPTextEncode", "widgets_values": ["linked positive text"], "inputs": []},
+                    {"id": 11, "type": "CLIPTextEncode", "widgets_values": ["linked negative text"], "inputs": []},
+                    {"id": 12, "type": "CLIPTextEncode", "widgets_values": ["unrelated text"], "inputs": []},
+                    {
+                        "id": 20,
+                        "type": "SamplerCustom",
+                        "inputs": [
+                            {"name": "positive", "link": 1001},
+                            {"name": "negative", "link": 1002},
+                        ],
+                    },
+                ],
+                "links": [
+                    [1001, 10, 0, 20, 0, "CONDITIONING"],
+                    [1002, 11, 0, 20, 1, "CONDITIONING"],
+                ],
+            }
+
+            gallery = nodes.WorkflowGallery()
+            gallery.collect(
+                [image],
+                output_directory=str(output_dir),
+                unique_id="node-workflow-linked",
+                prompt=None,
+                extra_pnginfo={"workflow": workflow},
+            )
+
+            payload = nodes._gallery_payload("node-workflow-linked")
+            self.assertEqual(payload["entries"][0]["positive_prompt"], "linked positive text")
+            self.assertEqual(payload["entries"][0]["negative_prompt"], "linked negative text")
+
     def test_prune_removes_full_and_thumb_files_and_index(self):
         nodes = _load_nodes_module()
 
