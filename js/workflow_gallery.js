@@ -163,9 +163,34 @@ async function copyToClipboard(text) {
   }
 }
 
+function getPromptValue(entry) {
+  return String(entry?.display_prompt || entry?.positive_prompt || "").trim();
+}
+
+function getNegativePromptValue(entry) {
+  return String(entry?.negative_prompt || "").trim();
+}
+
+function getPromptSource(entry) {
+  return String(entry?.prompt_source || "unavailable").trim();
+}
+
 function formatPromptForDisplay(entry) {
-  const positive = (entry?.positive_prompt || "").trim();
-  return positive ? `Positive:\n${positive}` : "";
+  const positive = getPromptValue(entry);
+  const negative = getNegativePromptValue(entry);
+  if (!positive && !negative) return "";
+  if (positive && negative) return `[Positive]\n${positive}\n\n[Negative]\n${negative}`;
+  if (positive) return positive;
+  return `[Negative]\n${negative}`;
+}
+
+function formatTooltip(entry) {
+  const positive = getPromptValue(entry);
+  const negative = getNegativePromptValue(entry);
+  const parts = [];
+  if (positive) parts.push(`Positive: ${positive}`);
+  if (negative) parts.push(`Negative: ${negative}`);
+  return parts.join("\n\n");
 }
 
 
@@ -203,9 +228,10 @@ function renderGallery(node, payload) {
     const item = el("div", { className: `wg-item${selected ? " selected" : ""}` });
     const img = el("img", { src: entry.thumb_url, loading: "lazy", alt: entry.filename });
     const promptPreview = formatPromptForDisplay(entry);
-    if (promptPreview) {
-      item.title = promptPreview;
-      img.title = promptPreview;
+    const tooltipText = formatTooltip(entry);
+    if (tooltipText) {
+      item.title = tooltipText;
+      img.title = tooltipText;
     }
     const caption = el("div", { className: "wg-caption" }, [`${entry.filename}
 ${entry.width}×${entry.height}`]);
@@ -244,7 +270,10 @@ ${entry.width}×${entry.height}`]);
       state.previewImg.src = active.full_url;
       state.previewImg.alt = active.filename;
       state.previewCaption.textContent = `${active.filename} • ${active.width}×${active.height}`;
-      state.promptText.textContent = formatPromptForDisplay(active) || "No prompt metadata found for this image.";
+      {
+        const promptPreview = formatPromptForDisplay(active);
+        state.promptText.textContent = promptPreview || "No prompt metadata found for this image.";
+      }
       updateNavButtons(state, entries);
     }
   } else {
@@ -298,8 +327,14 @@ function attachDom(node) {
   copyPromptBtn.addEventListener("click", async (e) => {
     e.preventDefault();
     const entry = node.__wgState?.payload?.entries?.find((item) => item.id === node.__wgState?.selectedId);
-    const ok = await copyToClipboard(entry?.positive_prompt || "");
-    if (!ok) console.warn("Workflow Gallery copy prompt failed");
+    const ok = await copyToClipboard(getPromptValue(entry));
+    if (ok) {
+      const prev = copyPromptBtn.textContent;
+      copyPromptBtn.textContent = "Copied!";
+      setTimeout(() => { copyPromptBtn.textContent = prev; }, 1500);
+    } else {
+      console.warn("Workflow Gallery copy prompt failed");
+    }
   });
 
   const root = el("div", { className: "wg-root" }, [
