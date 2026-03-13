@@ -94,6 +94,20 @@ class TestPruneCleanup(unittest.TestCase):
         self.assertEqual(positive, "actual positive prompt")
         self.assertEqual(negative, "actual negative prompt")
 
+    def test_extract_prompts_accepts_direct_node_id_reference(self):
+        nodes = _load_nodes_module()
+
+        prompt_graph = {
+            "1": {"class_type": "CLIPTextEncode", "inputs": {"text": "direct positive"}},
+            "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "direct negative"}},
+            "3": {"class_type": "KSampler", "inputs": {"positive": "1", "negative": "2"}},
+        }
+
+        positive, negative = nodes._extract_prompts(prompt_graph)
+
+        self.assertEqual(positive, "direct positive")
+        self.assertEqual(negative, "direct negative")
+
     def test_collect_exposes_prompt_fields_in_payload(self):
         nodes = _load_nodes_module()
 

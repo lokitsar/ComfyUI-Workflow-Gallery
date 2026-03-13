@@ -92,15 +92,24 @@ def _entry_public(entry: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _resolve_text_from_ref(prompt_graph: Dict[str, Any], value: Any, visited: set[str] | None = None) -> str:
-    if not isinstance(value, (list, tuple)) or not value:
+    node_ref = ""
+    if isinstance(value, (list, tuple)) and value:
+        node_ref = str(value[0])
+    elif isinstance(value, (str, int)):
+        node_ref = str(value)
+
+    if not node_ref:
         return ""
 
-    node_ref = str(value[0])
+    if node_ref not in prompt_graph:
+        return ""
+
     if visited is None:
         visited = set()
     if node_ref in visited:
         return ""
-    visited.add(node_ref)
+    current_visited = set(visited)
+    current_visited.add(node_ref)
 
     node = prompt_graph.get(node_ref)
     if not isinstance(node, dict):
@@ -118,7 +127,7 @@ def _resolve_text_from_ref(prompt_graph: Dict[str, Any], value: Any, visited: se
     for child_value in inputs.values():
         if not isinstance(child_value, (list, tuple)):
             continue
-        text = _resolve_text_from_ref(prompt_graph, child_value, visited)
+        text = _resolve_text_from_ref(prompt_graph, child_value, current_visited)
         if text:
             return text
     return ""
