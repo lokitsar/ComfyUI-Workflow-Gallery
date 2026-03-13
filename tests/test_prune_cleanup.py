@@ -126,6 +126,23 @@ class TestPruneCleanup(unittest.TestCase):
         self.assertEqual(positive, "positive via intermediate")
         self.assertEqual(negative, "negative via direct")
 
+    def test_extract_prompts_reads_sdxl_textencode_fields(self):
+        nodes = _load_nodes_module()
+
+        prompt_graph = {
+            "1": {
+                "class_type": "CLIPTextEncodeSDXL",
+                "inputs": {"text_g": "cinematic city skyline", "text_l": "cinematic city skyline"},
+            },
+            "2": {"class_type": "CLIPTextEncode", "inputs": {"text": "low quality"}},
+            "3": {"class_type": "KSampler", "inputs": {"positive": ["1", 0], "negative": ["2", 0]}},
+        }
+
+        positive, negative = nodes._extract_prompts(prompt_graph)
+
+        self.assertEqual(positive, "cinematic city skyline")
+        self.assertEqual(negative, "low quality")
+
     def test_collect_exposes_prompt_fields_in_payload(self):
         nodes = _load_nodes_module()
 

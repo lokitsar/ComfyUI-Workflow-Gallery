@@ -120,9 +120,21 @@ def _resolve_text_from_ref(prompt_graph: Dict[str, Any], value: Any, visited: se
     if not isinstance(inputs, dict):
         inputs = {}
 
-    if class_type.startswith("CLIPTextEncode"):
-        text = inputs.get("text")
-        return text.strip() if isinstance(text, str) else ""
+    if "TextEncode" in class_type:
+        text_fields = [
+            inputs.get("text"),
+            inputs.get("prompt"),
+            inputs.get("text_g"),
+            inputs.get("text_l"),
+            inputs.get("clip_l"),
+            inputs.get("clip_g"),
+            inputs.get("t5xxl"),
+            inputs.get("t5xxl_text"),
+        ]
+        parts = [item.strip() for item in text_fields if isinstance(item, str) and item.strip()]
+        if parts:
+            unique_parts = list(dict.fromkeys(parts))
+            return "\n".join(unique_parts)
 
     for child_value in inputs.values():
         text = _resolve_text_from_ref(prompt_graph, child_value, current_visited)
