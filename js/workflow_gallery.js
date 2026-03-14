@@ -50,7 +50,6 @@ function ensureStyles() {
     .wg-gallery { flex:1 1 auto; min-height:0; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; overscroll-behavior:contain; }
     .wg-root.viewer-mode .wg-gallery, .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-meta { display:none; }
     .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:0; }
-    .wg-item { border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.18); cursor:pointer; }
     .wg-item img { display:block; width:100%; height:auto; }
     .wg-item.selected { outline:2px solid rgba(120,180,255,0.9); }
     .wg-caption { padding:4px 6px; font-size:11px; line-height:1.25; word-break:break-word; opacity:0.9; }
@@ -59,7 +58,14 @@ function ensureStyles() {
     .wg-slider-row input[type='range'] { flex:1; }
     .wg-order-hint { font-size:11px; opacity:0.75; text-align:right; }
     .wg-item.compare-selected { outline:2px solid rgba(255,180,50,0.9); }
-    .wg-compare-btn { cursor:pointer; background:rgba(255,180,50,0.15); border:1px solid rgba(255,180,50,0.5); color:rgba(255,180,50,1); border-radius:4px; padding:2px 8px; font-size:12px; }
+    .wg-item.exported .wg-export-badge { display:flex; }
+    .wg-export-badge { display:none; position:absolute; top:4px; right:4px; background:rgba(60,180,80,0.92); color:#fff; border-radius:50%; width:20px; height:20px; align-items:center; justify-content:center; font-size:12px; font-weight:bold; box-shadow:0 1px 4px rgba(0,0,0,0.4); z-index:2; pointer-events:none; }
+    .wg-item { position:relative; border:1px solid rgba(255,255,255,0.12); border-radius:8px; overflow:hidden; background:rgba(0,0,0,0.18); cursor:pointer; }
+    .wg-export-btn { cursor:pointer; background:rgba(60,180,80,0.15); border:1px solid rgba(60,180,80,0.5); color:rgba(100,220,120,1); border-radius:4px; padding:2px 8px; font-size:12px; }
+    .wg-export-btn:hover { background:rgba(60,180,80,0.28); }
+    .wg-export-btn.hidden { display:none; }
+    .wg-clear-unexported-btn { cursor:pointer; font-size:12px; }
+    .wg-clear-unexported-btn.hidden { display:none; }
     .wg-compare-btn:hover { background:rgba(255,180,50,0.28); }
     .wg-compare-btn.hidden { display:none; }
     .wg-compare-wrap { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; gap:6px; overflow:hidden; }
@@ -89,6 +95,22 @@ async function fetchGallery(nodeId) {
 async function clearGallery(nodeId) {
   const res = await api.fetchApi(`/workflow_gallery/clear/${nodeId}`, { method: "POST" });
   if (!res.ok) throw new Error(`Failed to clear gallery ${nodeId}`);
+  return await res.json();
+}
+
+async function exportEntries(nodeId, entryIds, outputDirectory) {
+  const res = await api.fetchApi(`/workflow_gallery/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ node_id: nodeId, entry_ids: entryIds, output_directory: outputDirectory }),
+  });
+  if (!res.ok) throw new Error(`Export failed`);
+  return await res.json();
+}
+
+async function clearUnexported(nodeId) {
+  const res = await api.fetchApi(`/workflow_gallery/clear_unexported/${nodeId}`, { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to clear unexported`);
   return await res.json();
 }
 
@@ -225,7 +247,7 @@ function getCompareStageHeight(node) {
 
 function openCompareMode(node) {
   const state = node.__wgState;
-  if (!state || state.compareIds.length < 2) return;
+  if (!state || !state.compareIds || state.compareIds.length < 2) return;
   const entries = getDisplayEntries(state.payload);
   const entryA = entries.find(e => e.id === state.compareIds[0]);
   const entryB = entries.find(e => e.id === state.compareIds[1]);
@@ -288,12 +310,15 @@ function closeCompareMode(node) {
   const state = node.__wgState;
   if (!state) return;
   state.compareIds = [];
+  state.selectedIds = [];
   state.compareWrap.style.display = "none";
   state.previewStage.style.display = "";
   state.previewCaption.style.display = "";
   state.promptActions.style.display = "";
   state.promptText.style.display = "";
   state.compareBtn.classList.add("hidden");
+  state.exportBtn.classList.add("hidden");
+  state.clearUnexportedBtn.classList.remove("hidden");
   state.root.classList.remove("viewer-mode");
   state.preview.classList.add("hidden");
   renderGallery(node, state.payload || { entries: [] });
@@ -367,8 +392,10 @@ function renderGallery(node, payload) {
 
   for (const entry of entries) {
     const selected = entry.id === state.selectedId;
-    const compareSelected = state.compareIds?.includes(entry.id);
-    const item = el("div", { className: `wg-item${selected ? " selected" : ""}${compareSelected ? " compare-selected" : ""}` });
+    const compareSelected = state.selectedIds?.includes(entry.id);
+    const isExported = entry.exported === true;
+    const item = el("div", { className: `wg-item${selected ? " selected" : ""}${compareSelected ? " compare-selected" : ""}${isExported ? " exported" : ""}` });
+    const badge = el("div", { className: "wg-export-badge" }, ["✓"]);
     const img = el("img", { src: entry.thumb_url, loading: "lazy", alt: entry.filename });
     const promptPreview = formatPromptForDisplay(entry);
     const tooltipText = formatTooltip(entry);
@@ -379,19 +406,22 @@ function renderGallery(node, payload) {
     const caption = el("div", { className: "wg-caption" }, [`${entry.filename}
 ${entry.width}×${entry.height}`]);
 
+    item.appendChild(badge);
     item.appendChild(img);
     item.appendChild(caption);
     item.addEventListener("click", (e) => {
-      // Shift-click: toggle compare selection (orange highlight)
+      // Shift-click: unified selection for export and compare
       if (e.shiftKey) {
-        const idx = state.compareIds.indexOf(entry.id);
+        const idx = state.selectedIds.indexOf(entry.id);
         if (idx !== -1) {
-          state.compareIds.splice(idx, 1);
+          state.selectedIds.splice(idx, 1);
         } else {
-          if (state.compareIds.length >= 2) state.compareIds.shift();
-          state.compareIds.push(entry.id);
+          state.selectedIds.push(entry.id);
         }
-        state.compareBtn.classList.toggle("hidden", state.compareIds.length < 2);
+        const count = state.selectedIds.length;
+        state.exportBtn.classList.toggle("hidden", count < 1);
+        state.compareBtn.classList.toggle("hidden", count !== 2);
+        state.clearUnexportedBtn.classList.toggle("hidden", count > 0);
         renderGallery(node, state.payload || payload);
         node.setDirtyCanvas(true, true);
         return;
@@ -448,8 +478,10 @@ ${entry.width}×${entry.height}`]);
 function attachDom(node) {
   ensureStyles();
 
-  const clearBtn = el("button", { type: "button" }, ["Clear"]);
+  const clearBtn = el("button", { type: "button" }, ["Clear All"]);
+  const clearUnexportedBtn = el("button", { type: "button", className: "wg-clear-unexported-btn" }, ["Clear Unexported"]);
   const refreshBtn = el("button", { type: "button" }, ["Refresh"]);
+  const exportBtn = el("button", { type: "button", className: "wg-export-btn hidden" }, ["↓ Export Selected"]);
   const compareBtn = el("button", { type: "button", className: "wg-compare-btn hidden" }, ["⇔ Compare"]);
   const count = el("span", { className: "wg-count" }, ["0 / 0"]);
   const previewImg = el("img", { className: "wg-preview-img", loading: "eager", alt: "Selected image preview" });
@@ -513,7 +545,7 @@ function attachDom(node) {
   });
 
   const root = el("div", { className: "wg-root" }, [
-    el("div", { className: "wg-topbar" }, [clearBtn, refreshBtn, compareBtn, count]),
+    el("div", { className: "wg-topbar" }, [clearBtn, clearUnexportedBtn, refreshBtn, exportBtn, compareBtn, count]),
     preview,
     gallery,
     el("div", { className: "wg-slider-row" }, [el("span", {}, ["Thumbnail size"]), thumbSlider]),
@@ -521,11 +553,57 @@ function attachDom(node) {
     el("div", { className: "wg-meta", style: { fontSize: "11px", opacity: "0.8", wordBreak: "break-all", display: "grid", gap: "2px" } }, [saveMode, dir]),
   ]);
 
-  node.__wgState = { root, clearBtn, refreshBtn, compareBtn, count, preview, previewStage, previewImg, previewCaption, promptText, promptActions, navLeft, navRight, gallery, thumbSlider, saveMode, dir, compareWrap, compareStage, compareImgLeft, compareImgRight, compareSideLeft, compareSideRight, compareDivider, compareLabelLeft, compareLabelRight, selectedId: null, payload: null, compareIds: [], compareDividerPos: 50 };
+  node.__wgState = { root, clearBtn, clearUnexportedBtn, refreshBtn, exportBtn, compareBtn, count, preview, previewStage, previewImg, previewCaption, promptText, promptActions, navLeft, navRight, gallery, thumbSlider, saveMode, dir, compareWrap, compareStage, compareImgLeft, compareImgRight, compareSideLeft, compareSideRight, compareDivider, compareLabelLeft, compareLabelRight, selectedId: null, payload: null, selectedIds: [], compareDividerPos: 50 };
+
+  exportBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const state = node.__wgState;
+    if (!state.selectedIds.length) return;
+    const outputDir = state.payload?.output_directory || "";
+    const prev = exportBtn.textContent;
+    exportBtn.textContent = "Exporting...";
+    exportBtn.disabled = true;
+    try {
+      const result = await exportEntries(node.id, [...state.selectedIds], outputDir);
+      const exportedCount = result.exported?.length || 0;
+      exportBtn.textContent = `✓ Exported ${exportedCount}!`;
+      setTimeout(() => {
+        exportBtn.textContent = prev;
+        exportBtn.disabled = false;
+      }, 2000);
+      // Clear selection and refresh
+      state.selectedIds = [];
+      state.compareBtn.classList.add("hidden");
+      state.exportBtn.classList.add("hidden");
+      state.clearUnexportedBtn.classList.remove("hidden");
+      const payload = await fetchGallery(node.id);
+      renderGallery(node, payload);
+    } catch (err) {
+      exportBtn.textContent = "Export failed";
+      exportBtn.disabled = false;
+      setTimeout(() => { exportBtn.textContent = prev; }, 2000);
+      console.warn("Workflow Gallery export failed", err);
+    }
+  });
 
   compareBtn.addEventListener("click", (e) => {
     e.preventDefault();
+    // Pass selectedIds to compare mode
+    node.__wgState.compareIds = [...node.__wgState.selectedIds];
     openCompareMode(node);
+  });
+
+  clearUnexportedBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const confirmed = confirm("Remove all unexported images from the gallery and cache?");
+    if (!confirmed) return;
+    try {
+      await clearUnexported(node.id);
+      const payload = await fetchGallery(node.id);
+      renderGallery(node, payload);
+    } catch (err) {
+      console.warn("Workflow Gallery clear unexported failed", err);
+    }
   });
 
   exitCompareBtn.addEventListener("click", (e) => {
@@ -550,8 +628,14 @@ function attachDom(node) {
 
   clearBtn.addEventListener("click", async (e) => {
     e.preventDefault();
+    const confirmed = confirm("Clear all images from the gallery including exported ones?");
+    if (!confirmed) return;
     try {
       await clearGallery(node.id);
+      node.__wgState.selectedIds = [];
+      node.__wgState.compareIds = [];
+      node.__wgState.exportBtn.classList.add("hidden");
+      node.__wgState.compareBtn.classList.add("hidden");
       const payload = await fetchGallery(node.id);
       renderGallery(node, payload);
     } catch (err) {
