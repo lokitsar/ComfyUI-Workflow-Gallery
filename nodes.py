@@ -12,6 +12,7 @@ from PIL import Image
 from PIL.PngImagePlugin import PngInfo
 from aiohttp import web
 from server import PromptServer
+import folder_paths
 
 
 GALLERY_STATE: Dict[str, Dict[str, Any]] = {}
@@ -20,8 +21,9 @@ STATE_LOCK = threading.Lock()
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-COMFY_ROOT_DIR = PACKAGE_DIR.parents[2] if len(PACKAGE_DIR.parents) >= 3 else PACKAGE_DIR
-DEFAULT_SAVE_DIR = COMFY_ROOT_DIR / "output"
+# Use ComfyUI's built-in folder_paths module — works for all install types
+# (manual, portable, desktop app, etc.)
+DEFAULT_SAVE_DIR = Path(folder_paths.get_output_directory()) / "workflow_gallery"
 LEGACY_SAVE_DIR = PACKAGE_DIR / "gallery_output"
 CACHE_BASE_DIR = DEFAULT_SAVE_DIR / "Workflow-Gallery"
 DEFAULT_SAVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -90,6 +92,7 @@ def _entry_public(entry: Dict[str, Any]) -> Dict[str, Any]:
         "prompt_source": entry.get("prompt_source", "unavailable"),
         "positive_prompt": entry.get("positive_prompt", ""),
         "negative_prompt": entry.get("negative_prompt", ""),
+        "exported": entry.get("exported", False),
         "full_url": f"/workflow_gallery/file/{entry['id']}?kind=full",
         "thumb_url": f"/workflow_gallery/file/{entry['id']}?kind=thumb",
     }
@@ -523,7 +526,7 @@ def _gallery_payload(node_id: str) -> Dict[str, Any]:
             "count": len(entries),
             "max_images": state.get("max_images", 100),
             "output_directory": state.get("output_directory", str(DEFAULT_SAVE_DIR)),
-            "save_to_disk": state.get("save_to_disk", True),
+            "save_to_disk": state.get("save_to_disk", False),
             "entries": entries,
         }
 
@@ -582,7 +585,7 @@ class WorkflowGallery:
             "required": {
                 "images": ("IMAGE",),
                 "enabled": ("BOOLEAN", {"default": True}),
-                "save_to_disk": ("BOOLEAN", {"default": True}),
+                "save_to_disk": ("BOOLEAN", {"default": False}),
                 "output_directory": ("STRING", {"default": str(DEFAULT_SAVE_DIR), "multiline": False}),
                 "filename_prefix": ("STRING", {"default": "workflow_gallery", "multiline": False}),
                 "max_images": ("INT", {"default": 48, "min": 1, "max": 500, "step": 1}),
@@ -598,7 +601,7 @@ class WorkflowGallery:
         self,
         images,
         enabled: bool = True,
-        save_to_disk: bool = True,
+        save_to_disk: bool = False,
         output_directory: str = str(DEFAULT_SAVE_DIR),
         filename_prefix: str = "workflow_gallery",
         max_images: int = 48,
@@ -683,7 +686,7 @@ async def workflow_gallery_state(request):
 async def workflow_gallery_clear(request):
     node_id = request.match_info["node_id"]
     with STATE_LOCK:
-        state = GALLERY_STATE.setdefault(node_id, {"entries": [], "max_images": 100, "output_directory": str(DEFAULT_SAVE_DIR), "save_to_disk": True})
+        state = GALLERY_STATE.setdefault(node_id, {"entries": [], "max_images": 100, "output_directory": str(DEFAULT_SAVE_DIR), "save_to_disk": False})
         entries = list(state.get("entries", []))
         state["entries"] = []
         for entry in entries:
@@ -720,6 +723,101 @@ async def workflow_gallery_file(request):
     response = web.FileResponse(path, headers={"Cache-Control": "no-store"})
     response.content_type = content_type
     return response
+
+
+@routes.post("/workflow_gallery/export")
+async def workflow_gallery_export(request):
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    node_id = str(body.get("node_id", ""))
+    entry_ids: List[str] = body.get("entry_ids", [])
+    output_directory = str(body.get("output_directory", "")).strip()
+
+    if not entry_ids:
+        return web.json_response({"ok": False, "error": "No entry IDs provided"}, status=400)
+
+    # Resolve destination — use the node's configured output dir or fall back to default
+    dest_dir = _resolve_output_dir(output_directory) if output_directory else DEFAULT_SAVE_DIR
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    exported: List[str] = []
+    errors: List[str] = []
+
+    for entry_id in entry_ids:
+        entry = _find_entry(entry_id)
+        if not entry:
+            errors.append(f"{entry_id}: not found")
+            continue
+
+        src_path = Path(entry.get("full_path", ""))
+        if not src_path.exists():
+            errors.append(f"{entry_id}: source file missing")
+            continue
+
+        dest_path = dest_dir / src_path.name
+        # Avoid overwriting — append a suffix if needed
+        counter = 1
+        while dest_path.exists():
+            dest_path = dest_dir / f"{src_path.stem}_{counter}{src_path.suffix}"
+            counter += 1
+
+        try:
+            import shutil
+            shutil.copy2(str(src_path), str(dest_path))
+            # Mark entry as exported in state
+            with STATE_LOCK:
+                entry["exported"] = True
+                entry["exported_path"] = str(dest_path)
+            exported.append(entry_id)
+        except Exception as e:
+            errors.append(f"{entry_id}: {e}")
+
+    if node_id:
+        _send_gallery_update(node_id)
+
+    return web.json_response({
+        "ok": True,
+        "exported": exported,
+        "errors": errors,
+        "dest_directory": str(dest_dir),
+    })
+
+
+@routes.post("/workflow_gallery/clear_unexported/{node_id}")
+async def workflow_gallery_clear_unexported(request):
+    node_id = request.match_info["node_id"]
+    with STATE_LOCK:
+        state = GALLERY_STATE.get(node_id)
+        if not state:
+            return web.json_response({"ok": True, "removed": 0})
+
+        to_remove = [e for e in state.get("entries", []) if not e.get("exported", False)]
+        state["entries"] = [e for e in state.get("entries", []) if e.get("exported", False)]
+        for entry in to_remove:
+            ENTRY_INDEX.pop(entry.get("id", ""), None)
+
+    # Clean up files for removed entries
+    for entry in to_remove:
+        for key in ("thumb_path",):
+            path = entry.get(key)
+            if path:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+        # Only delete full_path if it's in the cache (not a user-configured save dir)
+        full_path = entry.get("full_path", "")
+        if full_path and str(CACHE_BASE_DIR) in full_path:
+            try:
+                Path(full_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    _send_gallery_update(node_id)
+    return web.json_response({"ok": True, "removed": len(to_remove)})
 
 
 NODE_CLASS_MAPPINGS = {
