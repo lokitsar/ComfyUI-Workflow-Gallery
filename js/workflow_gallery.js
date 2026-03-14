@@ -43,10 +43,10 @@ function ensureStyles() {
     .wg-nav { width:40px; height:88px; display:flex; align-items:center; justify-content:center; border:1px solid rgba(255,255,255,0.16); border-radius:10px; background:rgba(255,255,255,0.06); color:rgba(255,255,255,0.95); font-size:28px; line-height:1; cursor:pointer; user-select:none; transition:background 0.12s ease, opacity 0.12s ease; }
     .wg-nav:hover { background:rgba(255,255,255,0.12); }
     .wg-nav.hidden { visibility:hidden; pointer-events:none; opacity:0; }
-    .wg-preview-caption { padding-top:6px; font-size:11px; line-height:1.25; word-break:break-word; opacity:0.9; text-align:center; }
-    .wg-prompt-actions { display:flex; gap:6px; justify-content:center; margin-top:6px; }
+    .wg-preview-caption { padding-top:6px; font-size:11px; line-height:1.25; word-break:break-word; opacity:0.9; text-align:center; flex-shrink:0; }
+    .wg-prompt-actions { display:flex; gap:6px; justify-content:center; margin-top:6px; flex-shrink:0; }
     .wg-prompt-actions button { cursor:pointer; }
-    .wg-prompt-text { margin-top:6px; font-size:11px; line-height:1.3; white-space:pre-wrap; max-height:140px; overflow:auto; border:1px solid rgba(255,255,255,0.12); border-radius:6px; padding:6px; }
+    .wg-prompt-text { margin-top:6px; font-size:11px; line-height:1.3; white-space:pre-wrap; max-height:140px; overflow:auto; border:1px solid rgba(255,255,255,0.12); border-radius:6px; padding:6px; flex-shrink:0; }
     .wg-gallery { flex:1 1 auto; min-height:0; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; overscroll-behavior:contain; }
     .wg-root.viewer-mode .wg-gallery, .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-meta { display:none; }
     .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:0; }
@@ -58,6 +58,24 @@ function ensureStyles() {
     .wg-slider-row { display:flex; gap:8px; align-items:center; font-size:12px; }
     .wg-slider-row input[type='range'] { flex:1; }
     .wg-order-hint { font-size:11px; opacity:0.75; text-align:right; }
+    .wg-item.compare-selected { outline:2px solid rgba(255,180,50,0.9); }
+    .wg-compare-btn { cursor:pointer; background:rgba(255,180,50,0.15); border:1px solid rgba(255,180,50,0.5); color:rgba(255,180,50,1); border-radius:4px; padding:2px 8px; font-size:12px; }
+    .wg-compare-btn:hover { background:rgba(255,180,50,0.28); }
+    .wg-compare-btn.hidden { display:none; }
+    .wg-compare-wrap { flex:1 1 auto; min-height:0; display:flex; flex-direction:column; gap:6px; overflow:hidden; }
+    .wg-compare-stage { flex:1 1 auto; min-height:0; width:100%; position:relative; overflow:hidden; border-radius:8px; background:rgba(0,0,0,0.3); user-select:none; }
+    .wg-compare-side { position:absolute; top:0; bottom:0; overflow:hidden; }
+    .wg-compare-side-left { left:0; right:auto; }
+    .wg-compare-side-right { right:0; left:auto; }
+    .wg-compare-side img { position:absolute; top:0; display:block; pointer-events:none; object-fit:contain; }
+    .wg-compare-side-left img { left:0; width:100%; height:100%; }
+    .wg-compare-side-right img { right:0; height:100%; }
+    .wg-compare-divider { position:absolute; top:0; bottom:0; width:4px; background:rgba(255,255,255,0.9); cursor:ew-resize; z-index:10; transform:translateX(-50%); border-radius:2px; box-shadow:0 0 8px rgba(0,0,0,0.6); }
+    .wg-compare-divider::after { content:'⇔'; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(255,255,255,0.95); color:#333; border-radius:50%; width:28px; height:28px; display:flex; align-items:center; justify-content:center; font-size:13px; box-shadow:0 2px 6px rgba(0,0,0,0.4); }
+    .wg-compare-labels { display:flex; gap:8px; font-size:11px; flex-shrink:0; }
+    .wg-compare-label { flex:1; padding:4px 6px; border-radius:6px; border:1px solid rgba(255,255,255,0.1); background:rgba(0,0,0,0.2); white-space:pre-wrap; max-height:80px; overflow:auto; line-height:1.3; }
+    .wg-compare-label-title { font-weight:bold; opacity:0.7; margin-bottom:2px; font-size:10px; text-transform:uppercase; letter-spacing:0.05em; }
+    .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:0; }
   `;
   document.head.appendChild(style);
 }
@@ -194,6 +212,130 @@ function formatTooltip(entry) {
 }
 
 
+function getCompareStageHeight(node) {
+  // node.size[1] is the total node height in canvas pixels.
+  // Subtract top fields area (inputs) + topbar + labels + padding.
+  const totalH = node.size?.[1] || 900;
+  const fieldsH = 130; // enabled/save/dir/prefix/max_images inputs
+  const topbarH = 36;
+  const labelsH = 130; // prompt labels + exit button
+  const padding = 32;
+  return Math.max(200, totalH - fieldsH - topbarH - labelsH - padding);
+}
+
+function openCompareMode(node) {
+  const state = node.__wgState;
+  if (!state || state.compareIds.length < 2) return;
+  const entries = getDisplayEntries(state.payload);
+  const entryA = entries.find(e => e.id === state.compareIds[0]);
+  const entryB = entries.find(e => e.id === state.compareIds[1]);
+  if (!entryA || !entryB) return;
+
+  state.root.classList.add("viewer-mode");
+  state.preview.classList.remove("hidden");
+
+  // Hide normal viewer contents, show compare wrap
+  state.previewStage.style.display = "none";
+  state.previewCaption.style.display = "none";
+  state.promptActions.style.display = "none";
+  state.promptText.style.display = "none";
+  state.compareWrap.style.display = "flex";
+
+  // Set explicit stage height from node canvas size
+  const stageH = getCompareStageHeight(node);
+  state.compareStage.style.height = `${stageH}px`;
+  state.compareStage.style.flexShrink = "0";
+
+  // Set images
+  state.compareImgLeft.src = entryA.full_url;
+  state.compareImgRight.src = entryB.full_url;
+
+  // Set prompt labels
+  const promptA = formatPromptForDisplay(entryA);
+  const promptB = formatPromptForDisplay(entryB);
+  state.compareLabelLeft.innerHTML = `<div class="wg-compare-label-title">Image A</div>${promptA || "No prompt metadata"}`;
+  state.compareLabelRight.innerHTML = `<div class="wg-compare-label-title">Image B</div>${promptB || "No prompt metadata"}`;
+
+  // Reset divider to center
+  state.compareDividerPos = 50;
+  requestAnimationFrame(() => updateCompareDivider(state));
+
+  node.setDirtyCanvas(true, true);
+}
+
+function updateCompareDivider(state) {
+  const pct = state.compareDividerPos;
+  // Left side clips at divider position
+  state.compareSideLeft.style.width = `${pct}%`;
+  // Right side starts at divider and fills the rest
+  state.compareSideRight.style.width = `${100 - pct}%`;
+  state.compareSideRight.style.left = `${pct}%`;
+  // Right image width is set to the full stage width so it appears full size,
+  // but anchored to the right edge so the visible portion aligns correctly
+  const stageW = state.compareStage.offsetWidth || 800;
+  const rightPanelW = stageW * (1 - pct / 100);
+  const fullW = stageW;
+  state.compareImgRight.style.width = `${fullW}px`;
+  state.compareImgRight.style.right = `0`;
+  state.compareImgRight.style.left = `auto`;
+  // Left image just fills its panel naturally at full stage width
+  state.compareImgLeft.style.width = `${stageW}px`;
+  // Move divider bar
+  state.compareDivider.style.left = `${pct}%`;
+}
+
+function closeCompareMode(node) {
+  const state = node.__wgState;
+  if (!state) return;
+  state.compareIds = [];
+  state.compareWrap.style.display = "none";
+  state.previewStage.style.display = "";
+  state.previewCaption.style.display = "";
+  state.promptActions.style.display = "";
+  state.promptText.style.display = "";
+  state.compareBtn.classList.add("hidden");
+  state.root.classList.remove("viewer-mode");
+  state.preview.classList.add("hidden");
+  renderGallery(node, state.payload || { entries: [] });
+  node.setDirtyCanvas(true, true);
+}
+
+function attachCompareDrag(state, stageEl) {
+  let dragging = false;
+
+  state.compareDivider.addEventListener("mousedown", (e) => {
+    dragging = true;
+    e.preventDefault();
+  });
+
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const rect = stageEl.getBoundingClientRect();
+    const pct = Math.min(95, Math.max(5, ((e.clientX - rect.left) / rect.width) * 100));
+    state.compareDividerPos = pct;
+    updateCompareDivider(state);
+  });
+
+  document.addEventListener("mouseup", () => { dragging = false; });
+
+  // Touch support
+  state.compareDivider.addEventListener("touchstart", (e) => {
+    dragging = true;
+    e.preventDefault();
+  }, { passive: false });
+
+  document.addEventListener("touchmove", (e) => {
+    if (!dragging) return;
+    const rect = stageEl.getBoundingClientRect();
+    const touch = e.touches[0];
+    const pct = Math.min(95, Math.max(5, ((touch.clientX - rect.left) / rect.width) * 100));
+    state.compareDividerPos = pct;
+    updateCompareDivider(state);
+  }, { passive: true });
+
+  document.addEventListener("touchend", () => { dragging = false; });
+}
+
 function renderGallery(node, payload) {
   const state = node.__wgState;
   if (!state) return;
@@ -225,7 +367,8 @@ function renderGallery(node, payload) {
 
   for (const entry of entries) {
     const selected = entry.id === state.selectedId;
-    const item = el("div", { className: `wg-item${selected ? " selected" : ""}` });
+    const compareSelected = state.compareIds?.includes(entry.id);
+    const item = el("div", { className: `wg-item${selected ? " selected" : ""}${compareSelected ? " compare-selected" : ""}` });
     const img = el("img", { src: entry.thumb_url, loading: "lazy", alt: entry.filename });
     const promptPreview = formatPromptForDisplay(entry);
     const tooltipText = formatTooltip(entry);
@@ -238,7 +381,23 @@ ${entry.width}×${entry.height}`]);
 
     item.appendChild(img);
     item.appendChild(caption);
-    item.addEventListener("click", () => {
+    item.addEventListener("click", (e) => {
+      // Shift-click: toggle compare selection (orange highlight)
+      if (e.shiftKey) {
+        const idx = state.compareIds.indexOf(entry.id);
+        if (idx !== -1) {
+          state.compareIds.splice(idx, 1);
+        } else {
+          if (state.compareIds.length >= 2) state.compareIds.shift();
+          state.compareIds.push(entry.id);
+        }
+        state.compareBtn.classList.toggle("hidden", state.compareIds.length < 2);
+        renderGallery(node, state.payload || payload);
+        node.setDirtyCanvas(true, true);
+        return;
+      }
+
+      // Normal click: single image viewer
       if (state.selectedId === entry.id) {
         state.selectedId = null;
         state.root.classList.remove("viewer-mode");
@@ -291,6 +450,7 @@ function attachDom(node) {
 
   const clearBtn = el("button", { type: "button" }, ["Clear"]);
   const refreshBtn = el("button", { type: "button" }, ["Refresh"]);
+  const compareBtn = el("button", { type: "button", className: "wg-compare-btn hidden" }, ["⇔ Compare"]);
   const count = el("span", { className: "wg-count" }, ["0 / 0"]);
   const previewImg = el("img", { className: "wg-preview-img", loading: "eager", alt: "Selected image preview" });
   const navLeft = el("button", { type: "button", className: "wg-nav hidden", "aria-label": "Previous image" }, ["‹"]);
@@ -298,8 +458,23 @@ function attachDom(node) {
   const previewCaption = el("div", { className: "wg-preview-caption" }, [""]);
   const copyPromptBtn = el("button", { type: "button" }, ["Copy prompt"]);
   const promptText = el("div", { className: "wg-prompt-text" }, [""]);
+  const promptActions = el("div", { className: "wg-prompt-actions" }, [copyPromptBtn]);
   const previewStage = el("div", { className: "wg-preview-stage" }, [el("div", { className: "wg-preview-lane wg-preview-lane-left" }, [navLeft]), el("div", { className: "wg-preview-img-wrap" }, [previewImg]), el("div", { className: "wg-preview-lane wg-preview-lane-right" }, [navRight])]);
-  const preview = el("div", { className: "wg-preview hidden" }, [previewStage, previewCaption, el("div", { className: "wg-prompt-actions" }, [copyPromptBtn]), promptText]);
+
+  // Compare mode UI
+  const compareImgLeft = el("img", { alt: "Compare A", draggable: "false" });
+  const compareImgRight = el("img", { alt: "Compare B", draggable: "false" });
+  const compareSideLeft = el("div", { className: "wg-compare-side wg-compare-side-left" }, [compareImgLeft]);
+  const compareSideRight = el("div", { className: "wg-compare-side wg-compare-side-right" }, [compareImgRight]);
+  const compareDivider = el("div", { className: "wg-compare-divider" });
+  const compareStage = el("div", { className: "wg-compare-stage" }, [compareSideLeft, compareSideRight, compareDivider]);
+  const compareLabelLeft = el("div", { className: "wg-compare-label" });
+  const compareLabelRight = el("div", { className: "wg-compare-label" });
+  const compareLabels = el("div", { className: "wg-compare-labels" }, [compareLabelLeft, compareLabelRight]);
+  const exitCompareBtn = el("button", { type: "button" }, ["✕ Exit compare"]);
+  const compareWrap = el("div", { className: "wg-compare-wrap", style: { display: "none" } }, [compareStage, compareLabels, el("div", { className: "wg-prompt-actions" }, [exitCompareBtn])]);
+
+  const preview = el("div", { className: "wg-preview hidden" }, [previewStage, previewCaption, promptActions, promptText, compareWrap]);
   const gallery = el("div", { className: "wg-gallery" });
   const initialThumbSize = loadThumbSizePreference();
   const thumbSlider = el("input", {
@@ -338,7 +513,7 @@ function attachDom(node) {
   });
 
   const root = el("div", { className: "wg-root" }, [
-    el("div", { className: "wg-topbar" }, [clearBtn, refreshBtn, count]),
+    el("div", { className: "wg-topbar" }, [clearBtn, refreshBtn, compareBtn, count]),
     preview,
     gallery,
     el("div", { className: "wg-slider-row" }, [el("span", {}, ["Thumbnail size"]), thumbSlider]),
@@ -346,7 +521,19 @@ function attachDom(node) {
     el("div", { className: "wg-meta", style: { fontSize: "11px", opacity: "0.8", wordBreak: "break-all", display: "grid", gap: "2px" } }, [saveMode, dir]),
   ]);
 
-  node.__wgState = { root, clearBtn, refreshBtn, count, preview, previewStage, previewImg, previewCaption, promptText, navLeft, navRight, gallery, thumbSlider, saveMode, dir, selectedId: null, payload: null };
+  node.__wgState = { root, clearBtn, refreshBtn, compareBtn, count, preview, previewStage, previewImg, previewCaption, promptText, promptActions, navLeft, navRight, gallery, thumbSlider, saveMode, dir, compareWrap, compareStage, compareImgLeft, compareImgRight, compareSideLeft, compareSideRight, compareDivider, compareLabelLeft, compareLabelRight, selectedId: null, payload: null, compareIds: [], compareDividerPos: 50 };
+
+  compareBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    openCompareMode(node);
+  });
+
+  exitCompareBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    closeCompareMode(node);
+  });
+
+  attachCompareDrag(node.__wgState, compareStage);
 
   const applyThumbSizePreference = () => {
     const size = clampThumbSize(thumbSlider.value);
@@ -436,6 +623,17 @@ app.registerExtension({
         this.__wgKeyHandler = null;
       }
       return onRemoved?.apply(this, arguments);
+    };
+
+    const onResize = nodeType.prototype.onResize;
+    nodeType.prototype.onResize = function (size) {
+      const state = this.__wgState;
+      if (state && state.compareWrap?.style.display !== "none") {
+        const stageH = getCompareStageHeight(this);
+        state.compareStage.style.height = `${stageH}px`;
+        requestAnimationFrame(() => updateCompareDivider(state));
+      }
+      return onResize?.apply(this, arguments);
     };
   },
 });
