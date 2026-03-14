@@ -9,6 +9,7 @@ license = { text = "MIT" }
 authors = [
     { name = "lokitsar" }
 ]
+keywords = ["comfyui", "gallery", "images", "workflow", "thumbnails"]
 dependencies = [
     "Pillow>=10.0.0",
     "numpy>=1.24.0"
@@ -20,4 +21,4 @@ Repository = "https://github.com/lokitsar/ComfyUI-Workflow-Gallery"
 [tool.comfy]
 PublisherId = "lokitsar"
 DisplayName = "Workflow Gallery"
-Icon = "️"
+Icon = "🖼️"
