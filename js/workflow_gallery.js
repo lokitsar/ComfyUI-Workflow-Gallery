@@ -46,7 +46,15 @@ function ensureStyles() {
     .wg-preview-caption { padding-top:6px; font-size:11px; line-height:1.25; word-break:break-word; opacity:0.9; text-align:center; flex-shrink:0; }
     .wg-prompt-actions { display:flex; gap:6px; justify-content:center; margin-top:6px; flex-shrink:0; }
     .wg-prompt-actions button { cursor:pointer; }
+    .wg-copy-seed-btn { cursor:pointer; font-size:11px; }
+    .wg-copy-seed-btn.hidden { display:none; }
     .wg-prompt-text { margin-top:6px; font-size:11px; line-height:1.3; white-space:pre-wrap; max-height:140px; overflow:auto; border:1px solid rgba(255,255,255,0.12); border-radius:6px; padding:6px; flex-shrink:0; }
+    .wg-prompt-sections { margin-top:6px; display:flex; flex-direction:column; gap:4px; max-height:160px; overflow:auto; flex-shrink:0; }
+    .wg-prompt-section { border:1px solid rgba(255,255,255,0.12); border-radius:6px; overflow:hidden; }
+    .wg-prompt-section-header { display:flex; align-items:center; justify-content:space-between; padding:3px 6px; background:rgba(255,255,255,0.06); font-size:10px; font-weight:bold; text-transform:uppercase; letter-spacing:0.05em; opacity:0.8; }
+    .wg-prompt-section-copy { cursor:pointer; background:none; border:1px solid rgba(255,255,255,0.2); border-radius:3px; color:inherit; font-size:10px; padding:1px 5px; opacity:0.7; }
+    .wg-prompt-section-copy:hover { opacity:1; background:rgba(255,255,255,0.1); }
+    .wg-prompt-section-body { padding:5px 6px; font-size:11px; line-height:1.3; white-space:pre-wrap; word-break:break-word; }
     .wg-gallery { flex:1 1 auto; min-height:0; overflow:auto; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:6px; display:grid; gap:6px; align-content:start; overscroll-behavior:contain; }
     .wg-root.viewer-mode .wg-gallery, .wg-root.viewer-mode .wg-slider-row, .wg-root.viewer-mode .wg-meta { display:none; }
     .wg-root.viewer-mode .wg-preview { flex:1 1 auto; min-height:0; }
@@ -157,7 +165,8 @@ function closeViewer(node) {
   state.preview.classList.add("hidden");
   state.previewImg.removeAttribute("src");
   state.previewCaption.textContent = "";
-  state.promptText.textContent = "";
+  state.promptText.innerHTML = "";
+  if (state.copySeedBtn) state.copySeedBtn.classList.add("hidden");
   renderGallery(node, state.payload || { entries: [] });
   node.setDirtyCanvas(true, true);
 }
@@ -211,6 +220,10 @@ function getNegativePromptValue(entry) {
   return String(entry?.negative_prompt || "").trim();
 }
 
+function getSeedValue(entry) {
+  return entry?.seed != null ? String(entry.seed) : null;
+}
+
 function getPromptSource(entry) {
   return String(entry?.prompt_source || "unavailable").trim();
 }
@@ -218,16 +231,21 @@ function getPromptSource(entry) {
 function formatPromptForDisplay(entry) {
   const positive = getPromptValue(entry);
   const negative = getNegativePromptValue(entry);
-  if (!positive && !negative) return "";
-  if (positive && negative) return `[Positive]\n${positive}\n\n[Negative]\n${negative}`;
-  if (positive) return positive;
-  return `[Negative]\n${negative}`;
+  const seed = getSeedValue(entry);
+  const parts = [];
+  if (seed !== null) parts.push(`🌱 Seed: ${seed}`);
+  if (positive && negative) parts.push(`[Positive]\n${positive}\n\n[Negative]\n${negative}`);
+  else if (positive) parts.push(positive);
+  else if (negative) parts.push(`[Negative]\n${negative}`);
+  return parts.join("\n\n");
 }
 
 function formatTooltip(entry) {
   const positive = getPromptValue(entry);
   const negative = getNegativePromptValue(entry);
+  const seed = getSeedValue(entry);
   const parts = [];
+  if (seed !== null) parts.push(`Seed: ${seed}`);
   if (positive) parts.push(`Positive: ${positive}`);
   if (negative) parts.push(`Negative: ${negative}`);
   return parts.join("\n\n");
@@ -361,6 +379,40 @@ function attachCompareDrag(state, stageEl) {
   document.addEventListener("touchend", () => { dragging = false; });
 }
 
+function buildPromptSections(entry, container) {
+  container.innerHTML = "";
+  const seed = getSeedValue(entry);
+  const positive = getPromptValue(entry);
+  const negative = getNegativePromptValue(entry);
+
+  if (!seed && !positive && !negative) {
+    const empty = el("div", { style: { fontSize: "11px", opacity: "0.6", padding: "4px 6px" } }, ["No prompt metadata found for this image."]);
+    container.appendChild(empty);
+    return;
+  }
+
+  const makeSection = (label, text, copyValue) => {
+    const copyBtn = el("button", { type: "button", className: "wg-prompt-section-copy" }, ["Copy"]);
+    const header = el("div", { className: "wg-prompt-section-header" }, [label, copyBtn]);
+    const body = el("div", { className: "wg-prompt-section-body" }, [text]);
+    const section = el("div", { className: "wg-prompt-section" }, [header, body]);
+    copyBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const ok = await copyToClipboard(copyValue);
+      if (ok) {
+        copyBtn.textContent = "✓";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+      }
+    });
+    return section;
+  };
+
+  if (seed) container.appendChild(makeSection("🌱 Seed", seed, seed));
+  if (positive) container.appendChild(makeSection("Positive", positive, positive));
+  if (negative) container.appendChild(makeSection("Negative", negative, negative));
+}
+
+
 function renderGallery(node, payload) {
   const state = node.__wgState;
   if (!state) return;
@@ -379,7 +431,7 @@ function renderGallery(node, payload) {
     state.preview.classList.add("hidden");
     state.previewImg.removeAttribute("src");
     state.previewCaption.textContent = "";
-    state.promptText.textContent = "";
+    state.promptText.innerHTML = "";
     state.gallery.appendChild(el("div", { className: "wg-empty" }, ["Gallery is empty. Queue an image batch through this node."]));
     return;
   }
@@ -434,7 +486,8 @@ ${entry.width}×${entry.height}`]);
         state.preview.classList.add("hidden");
         state.previewImg.removeAttribute("src");
         state.previewCaption.textContent = "";
-        state.promptText.textContent = "";
+        state.promptText.innerHTML = "";
+        state.copySeedBtn.classList.add("hidden");
       } else {
         state.selectedId = entry.id;
         state.root.classList.add("viewer-mode");
@@ -442,7 +495,8 @@ ${entry.width}×${entry.height}`]);
         state.previewImg.src = entry.full_url;
         state.previewImg.alt = entry.filename;
         state.previewCaption.textContent = `${entry.filename} • ${entry.width}×${entry.height}`;
-        state.promptText.textContent = promptPreview || "No prompt metadata found for this image.";
+        buildPromptSections(entry, state.promptText);
+        state.copySeedBtn.classList.toggle("hidden", getSeedValue(entry) === null);
       }
       renderGallery(node, state.payload || payload);
       node.setDirtyCanvas(true, true);
@@ -460,8 +514,8 @@ ${entry.width}×${entry.height}`]);
       state.previewImg.alt = active.filename;
       state.previewCaption.textContent = `${active.filename} • ${active.width}×${active.height}`;
       {
-        const promptPreview = formatPromptForDisplay(active);
-        state.promptText.textContent = promptPreview || "No prompt metadata found for this image.";
+        buildPromptSections(active, state.promptText);
+        state.copySeedBtn.classList.toggle("hidden", getSeedValue(active) === null);
       }
       updateNavButtons(state, entries);
     }
@@ -470,7 +524,8 @@ ${entry.width}×${entry.height}`]);
     state.preview.classList.add("hidden");
     state.previewImg.removeAttribute("src");
     state.previewCaption.textContent = "";
-    state.promptText.textContent = "";
+    state.promptText.innerHTML = "";
+    state.copySeedBtn.classList.add("hidden");
     updateNavButtons(state, entries);
   }
 }
@@ -489,8 +544,9 @@ function attachDom(node) {
   const navRight = el("button", { type: "button", className: "wg-nav hidden", "aria-label": "Next image" }, ["›"]);
   const previewCaption = el("div", { className: "wg-preview-caption" }, [""]);
   const copyPromptBtn = el("button", { type: "button" }, ["Copy prompt"]);
-  const promptText = el("div", { className: "wg-prompt-text" }, [""]);
-  const promptActions = el("div", { className: "wg-prompt-actions" }, [copyPromptBtn]);
+  const copySeedBtn = el("button", { type: "button", className: "wg-copy-seed-btn hidden" }, ["Copy seed"]);
+  const promptText = el("div", { className: "wg-prompt-sections" }, []);
+  const promptActions = el("div", { className: "wg-prompt-actions" }, [copyPromptBtn, copySeedBtn]);
   const previewStage = el("div", { className: "wg-preview-stage" }, [el("div", { className: "wg-preview-lane wg-preview-lane-left" }, [navLeft]), el("div", { className: "wg-preview-img-wrap" }, [previewImg]), el("div", { className: "wg-preview-lane wg-preview-lane-right" }, [navRight])]);
 
   // Compare mode UI
@@ -544,6 +600,19 @@ function attachDom(node) {
     }
   });
 
+  copySeedBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const entry = node.__wgState?.payload?.entries?.find((item) => item.id === node.__wgState?.selectedId);
+    const seed = getSeedValue(entry);
+    if (!seed) return;
+    const ok = await copyToClipboard(seed);
+    if (ok) {
+      const prev = copySeedBtn.textContent;
+      copySeedBtn.textContent = "Copied!";
+      setTimeout(() => { copySeedBtn.textContent = prev; }, 1500);
+    }
+  });
+
   const root = el("div", { className: "wg-root" }, [
     el("div", { className: "wg-topbar" }, [clearBtn, clearUnexportedBtn, refreshBtn, exportBtn, compareBtn, count]),
     preview,
@@ -553,7 +622,7 @@ function attachDom(node) {
     el("div", { className: "wg-meta", style: { fontSize: "11px", opacity: "0.8", wordBreak: "break-all", display: "grid", gap: "2px" } }, [saveMode, dir]),
   ]);
 
-  node.__wgState = { root, clearBtn, clearUnexportedBtn, refreshBtn, exportBtn, compareBtn, count, preview, previewStage, previewImg, previewCaption, promptText, promptActions, navLeft, navRight, gallery, thumbSlider, saveMode, dir, compareWrap, compareStage, compareImgLeft, compareImgRight, compareSideLeft, compareSideRight, compareDivider, compareLabelLeft, compareLabelRight, selectedId: null, payload: null, selectedIds: [], compareDividerPos: 50 };
+  node.__wgState = { root, clearBtn, clearUnexportedBtn, refreshBtn, exportBtn, compareBtn, count, preview, previewStage, previewImg, previewCaption, promptText, promptActions, copyPromptBtn, copySeedBtn, navLeft, navRight, gallery, thumbSlider, saveMode, dir, compareWrap, compareStage, compareImgLeft, compareImgRight, compareSideLeft, compareSideRight, compareDivider, compareLabelLeft, compareLabelRight, selectedId: null, payload: null, selectedIds: [], compareIds: [], compareDividerPos: 50 };
 
   exportBtn.addEventListener("click", async (e) => {
     e.preventDefault();
