@@ -49,7 +49,7 @@ function ensureStyles() {
     .wg-copy-seed-btn { cursor:pointer; font-size:11px; }
     .wg-copy-seed-btn.hidden { display:none; }
     .wg-prompt-text { margin-top:6px; font-size:11px; line-height:1.3; white-space:pre-wrap; max-height:140px; overflow:auto; border:1px solid rgba(255,255,255,0.12); border-radius:6px; padding:6px; flex-shrink:0; }
-    .wg-prompt-sections { margin-top:6px; display:flex; flex-direction:column; gap:4px; max-height:160px; overflow:auto; flex-shrink:0; }
+    .wg-prompt-sections { margin-top:6px; display:flex; flex-direction:column; gap:4px; max-height:220px; overflow:auto; flex-shrink:0; }
     .wg-prompt-section { border:1px solid rgba(255,255,255,0.12); border-radius:6px; overflow:hidden; }
     .wg-prompt-section-header { display:flex; align-items:center; justify-content:space-between; padding:3px 6px; background:rgba(255,255,255,0.06); font-size:10px; font-weight:bold; text-transform:uppercase; letter-spacing:0.05em; opacity:0.8; }
     .wg-prompt-section-copy { cursor:pointer; background:none; border:1px solid rgba(255,255,255,0.2); border-radius:3px; color:inherit; font-size:10px; padding:1px 5px; opacity:0.7; }
@@ -391,9 +391,89 @@ function buildPromptSections(entry, container) {
     return;
   }
 
-  const makeSection = (label, text, copyValue) => {
+  const makeSection = (label, text, copyValue, isSaveable = false) => {
     const copyBtn = el("button", { type: "button", className: "wg-prompt-section-copy" }, ["Copy"]);
-    const header = el("div", { className: "wg-prompt-section-header" }, [label, copyBtn]);
+    const btns = el("div", { style: { display: "flex", gap: "4px" } }, [copyBtn]);
+
+    if (isSaveable) {
+      const saveBtn = el("button", { type: "button", className: "wg-prompt-section-copy" }, ["Save Prompt"]);
+      // Inline save form that appears below the section
+      const saveForm = el("div", { style: { display:"none", padding:"6px", gap:"4px", flexDirection:"column" } });
+      const nameIn = el("input", { type: "text", placeholder: "Prompt name *" });
+      nameIn.style.cssText = "padding:3px 6px;border-radius:4px;border:1px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.4);color:inherit;font-size:11px;width:100%;box-sizing:border-box;";
+      const tagsIn = el("input", { type: "text", placeholder: "Tags (comma separated, optional)" });
+      tagsIn.style.cssText = nameIn.style.cssText;
+      const confirmBtn = el("button", { type: "button" }, ["✓ Save"]);
+      const cancelBtn = el("button", { type: "button" }, ["✕"]);
+      confirmBtn.style.cssText = "cursor:pointer;padding:2px 8px;border-radius:4px;border:1px solid rgba(60,180,80,0.5);background:rgba(60,180,80,0.15);color:rgba(100,220,120,1);font-size:11px;";
+      cancelBtn.style.cssText = "cursor:pointer;padding:2px 8px;border-radius:4px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.06);color:inherit;font-size:11px;";
+      const formBtns = el("div", { style: { display:"flex", gap:"4px" } }, [confirmBtn, cancelBtn]);
+      saveForm.style.display = "none";
+      saveForm.appendChild(nameIn);
+      saveForm.appendChild(tagsIn);
+      saveForm.appendChild(formBtns);
+
+      saveBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        saveForm.style.display = saveForm.style.display === "none" ? "flex" : "none";
+        if (saveForm.style.display !== "none") nameIn.focus();
+      });
+
+      confirmBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const name = nameIn.value.trim();
+        if (!name) { nameIn.focus(); return; }
+        const tags = tagsIn.value.split(",").map(t => t.trim()).filter(Boolean);
+        try {
+          const res = await fetch("/prompt_library/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, positive_prompt: copyValue, tags }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            saveBtn.textContent = "✓ Saved!";
+            saveForm.style.display = "none";
+            nameIn.value = ""; tagsIn.value = "";
+            setTimeout(() => { saveBtn.textContent = "Save Prompt"; }, 2000);
+          } else if (res.status === 409) {
+            saveBtn.textContent = "Already exists";
+            setTimeout(() => { saveBtn.textContent = "Save Prompt"; }, 2000);
+            saveForm.style.display = "none";
+          } else {
+            saveBtn.textContent = "Error";
+            setTimeout(() => { saveBtn.textContent = "Save Prompt"; }, 2000);
+          }
+        } catch (err) {
+          console.warn("Save prompt failed", err);
+        }
+      });
+
+      cancelBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        saveForm.style.display = "none";
+        nameIn.value = ""; tagsIn.value = "";
+      });
+
+      btns.appendChild(saveBtn);
+      const section = el("div", { className: "wg-prompt-section" });
+      const header = el("div", { className: "wg-prompt-section-header" }, [label, btns]);
+      const body = el("div", { className: "wg-prompt-section-body" }, [text]);
+      section.appendChild(header);
+      section.appendChild(body);
+      section.appendChild(saveForm);
+      copyBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const ok = await copyToClipboard(copyValue);
+        if (ok) {
+          copyBtn.textContent = "✓";
+          setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+        }
+      });
+      return section;
+    }
+
+    const header = el("div", { className: "wg-prompt-section-header" }, [label, btns]);
     const body = el("div", { className: "wg-prompt-section-body" }, [text]);
     const section = el("div", { className: "wg-prompt-section" }, [header, body]);
     copyBtn.addEventListener("click", async (e) => {
@@ -407,9 +487,9 @@ function buildPromptSections(entry, container) {
     return section;
   };
 
-  if (seed) container.appendChild(makeSection("🌱 Seed", seed, seed));
-  if (positive) container.appendChild(makeSection("Positive", positive, positive));
-  if (negative) container.appendChild(makeSection("Negative", negative, negative));
+  if (seed) container.appendChild(makeSection("🌱 Seed", seed, seed, false));
+  if (positive) container.appendChild(makeSection("Positive", positive, positive, true));
+  if (negative) container.appendChild(makeSection("Negative", negative, negative, false));
 }
 
 
@@ -464,6 +544,9 @@ ${entry.width}×${entry.height}`]);
     item.addEventListener("click", (e) => {
       // Shift-click: unified selection for export and compare
       if (e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         const idx = state.selectedIds.indexOf(entry.id);
         if (idx !== -1) {
           state.selectedIds.splice(idx, 1);
