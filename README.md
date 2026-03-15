@@ -4,7 +4,7 @@ Workflow Gallery is a custom ComfyUI node that collects images passing through i
 
 ## Version
 
-Current release: **v0.1.15**
+Current release: **v0.1.16**
 
 ## Why I made this
 
