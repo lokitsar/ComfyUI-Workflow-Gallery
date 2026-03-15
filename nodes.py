@@ -35,6 +35,9 @@ ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 SESSION_DIR = CACHE_BASE_DIR / "sessions"
 SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
+PROMPT_LIBRARY_FILE = CACHE_BASE_DIR / "prompt_library.json"
+PROMPT_LIBRARY_LOCK = threading.Lock()
+
 
 def _safe_int(value: Any, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
     try:
@@ -222,6 +225,14 @@ def _resolve_text_from_ref(prompt_graph: Dict[str, Any], value: Any, visited: se
     # ZeroOut nodes intentionally nullify conditioning — stop walking here
     # so we don't trace back through them and bleed positive text into negative.
     if "ZeroOut" in class_type or "zero_out" in class_type.lower():
+        return ""
+
+    # PromptLibrary node — the selected_prompt_id widget stores the full
+    # built output string directly (set by the JS UI).
+    if class_type == "PromptLibrary":
+        val = inputs.get("selected_prompt_id", "")
+        if isinstance(val, str) and val.strip():
+            return val.strip()
         return ""
 
     if "TextEncode" in class_type:
@@ -980,10 +991,174 @@ async def workflow_gallery_clear_unexported(request):
     return web.json_response({"ok": True, "removed": len(to_remove)})
 
 
+def _load_prompt_library() -> List[Dict[str, Any]]:
+    try:
+        if PROMPT_LIBRARY_FILE.exists():
+            return json.loads(PROMPT_LIBRARY_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"[PromptLibrary] Error loading library: {e}", flush=True)
+    return []
+
+
+def _save_prompt_library(entries: List[Dict[str, Any]]) -> None:
+    try:
+        tmp = PROMPT_LIBRARY_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(PROMPT_LIBRARY_FILE)
+    except Exception as e:
+        print(f"[PromptLibrary] Error saving library: {e}", flush=True)
+
+
+class PromptLibrary:
+    CATEGORY = "utils/prompt"
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("prompt",)
+    FUNCTION = "get_prompt"
+    OUTPUT_NODE = False
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                # This widget stores the full built prompt string set by the JS UI
+                "selected_prompt_id": ("STRING", {"default": "", "multiline": False}),
+            },
+        }
+
+    def get_prompt(self, selected_prompt_id: str = ""):
+        # The JS stores the full built output (selected + manual) directly in this widget
+        return (selected_prompt_id,)
+
+
+@routes.get("/prompt_library/list")
+async def prompt_library_list(request):
+    with PROMPT_LIBRARY_LOCK:
+        entries = _load_prompt_library()
+    return web.json_response({"entries": entries})
+
+
+@routes.post("/prompt_library/save")
+async def prompt_library_save(request):
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    name = str(body.get("name", "")).strip()
+    positive_prompt = str(body.get("positive_prompt", "")).strip()
+    negative_prompt = str(body.get("negative_prompt", "")).strip()
+    tags = [str(t).strip() for t in body.get("tags", []) if str(t).strip()]
+
+    if not name:
+        return web.json_response({"ok": False, "error": "Name is required"}, status=400)
+    if not positive_prompt:
+        return web.json_response({"ok": False, "error": "Prompt is required"}, status=400)
+
+    with PROMPT_LIBRARY_LOCK:
+        entries = _load_prompt_library()
+        for entry in entries:
+            if entry.get("positive_prompt", "").strip() == positive_prompt:
+                return web.json_response({"ok": False, "error": "Prompt already exists", "id": entry["id"]}, status=409)
+        new_entry = {
+            "id": uuid.uuid4().hex,
+            "name": name,
+            "positive_prompt": positive_prompt,
+            "negative_prompt": negative_prompt,
+            "tags": tags,
+            "created": int(time.time()),
+        }
+        entries.append(new_entry)
+        _save_prompt_library(entries)
+
+    return web.json_response({"ok": True, "entry": new_entry})
+
+
+@routes.post("/prompt_library/delete")
+async def prompt_library_delete(request):
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    entry_id = str(body.get("id", "")).strip()
+    if not entry_id:
+        return web.json_response({"ok": False, "error": "ID required"}, status=400)
+
+    with PROMPT_LIBRARY_LOCK:
+        entries = _load_prompt_library()
+        new_entries = [e for e in entries if e.get("id") != entry_id]
+        if len(new_entries) == len(entries):
+            return web.json_response({"ok": False, "error": "Not found"}, status=404)
+        _save_prompt_library(new_entries)
+
+    return web.json_response({"ok": True})
+
+
+@routes.post("/prompt_library/update")
+async def prompt_library_update(request):
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    entry_id = str(body.get("id", "")).strip()
+    if not entry_id:
+        return web.json_response({"ok": False, "error": "ID required"}, status=400)
+
+    with PROMPT_LIBRARY_LOCK:
+        entries = _load_prompt_library()
+        for entry in entries:
+            if entry.get("id") == entry_id:
+                if "name" in body: entry["name"] = str(body["name"]).strip()
+                if "tags" in body: entry["tags"] = [str(t).strip() for t in body["tags"] if str(t).strip()]
+                if "positive_prompt" in body: entry["positive_prompt"] = str(body["positive_prompt"]).strip()
+                if "negative_prompt" in body: entry["negative_prompt"] = str(body["negative_prompt"]).strip()
+                _save_prompt_library(entries)
+                return web.json_response({"ok": True, "entry": entry})
+
+    return web.json_response({"ok": False, "error": "Not found"}, status=404)
+
+
+@routes.get("/prompt_library/export")
+async def prompt_library_export(request):
+    fmt = request.query.get("format", "json")
+    with PROMPT_LIBRARY_LOCK:
+        entries = _load_prompt_library()
+
+    if fmt == "csv":
+        import csv
+        import io as _io
+        buf = _io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=["id", "name", "tags", "positive_prompt", "negative_prompt", "created"])
+        writer.writeheader()
+        for e in entries:
+            writer.writerow({
+                "id": e.get("id", ""),
+                "name": e.get("name", ""),
+                "tags": ",".join(e.get("tags", [])),
+                "positive_prompt": e.get("positive_prompt", ""),
+                "negative_prompt": e.get("negative_prompt", ""),
+                "created": e.get("created", ""),
+            })
+        return web.Response(
+            body=buf.getvalue().encode("utf-8"),
+            content_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=prompt_library.csv"}
+        )
+    else:
+        return web.Response(
+            body=json.dumps(entries, ensure_ascii=False, indent=2).encode("utf-8"),
+            content_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=prompt_library.json"}
+        )
+
+
 NODE_CLASS_MAPPINGS = {
     "WorkflowGallery": WorkflowGallery,
+    "PromptLibrary": PromptLibrary,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "WorkflowGallery": "Workflow Gallery",
+    "PromptLibrary": "Prompt Library",
 }
