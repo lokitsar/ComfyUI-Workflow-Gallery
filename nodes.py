@@ -32,6 +32,9 @@ CACHE_BASE_DIR.mkdir(parents=True, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
+SESSION_DIR = CACHE_BASE_DIR / "sessions"
+SESSION_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def _safe_int(value: Any, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
     try:
@@ -93,6 +96,7 @@ def _entry_public(entry: Dict[str, Any]) -> Dict[str, Any]:
         "positive_prompt": entry.get("positive_prompt", ""),
         "negative_prompt": entry.get("negative_prompt", ""),
         "exported": entry.get("exported", False),
+        "seed": entry.get("seed", None),
         "full_url": f"/workflow_gallery/file/{entry['id']}?kind=full",
         "thumb_url": f"/workflow_gallery/file/{entry['id']}?kind=thumb",
     }
@@ -215,6 +219,11 @@ def _resolve_text_from_ref(prompt_graph: Dict[str, Any], value: Any, visited: se
     if not isinstance(inputs, dict):
         inputs = {}
 
+    # ZeroOut nodes intentionally nullify conditioning — stop walking here
+    # so we don't trace back through them and bleed positive text into negative.
+    if "ZeroOut" in class_type or "zero_out" in class_type.lower():
+        return ""
+
     if "TextEncode" in class_type:
         text_field_keys = ["text", "prompt", "text_g", "text_l", "clip_l", "clip_g", "t5xxl", "t5xxl_text"]
         parts: List[str] = []
@@ -234,6 +243,9 @@ def _resolve_text_from_ref(prompt_graph: Dict[str, Any], value: Any, visited: se
         if parts:
             unique_parts = list(dict.fromkeys(parts))
             return "\n".join(unique_parts)
+        # TextEncode node had no text — return empty rather than walking
+        # non-text children (e.g. clip input) which can bleed positive text into negative.
+        return ""
 
     # For non-TextEncode nodes (e.g. wildcard node, string node, primitive),
     # check common string output fields first before walking all children.
@@ -335,6 +347,37 @@ def _extract_prompts_with_fallback(prompt_graph: Any, extra_pnginfo: Any, galler
         return fallback_positive, fallback_negative, "embedded workflow metadata"
 
     return positive, negative, "unavailable"
+
+
+def _extract_seed(prompt_graph: Any, gallery_node_id: str | None = None) -> int | None:
+    """Extract the seed from the sampler node connected to the gallery."""
+    if not isinstance(prompt_graph, dict):
+        return None
+
+    sampler = _find_relevant_sampler(prompt_graph, gallery_node_id)
+    if sampler is None:
+        # Fall back to any sampler in the graph
+        for node in prompt_graph.values():
+            if isinstance(node, dict) and _is_sampler_node(node):
+                sampler = node
+                break
+
+    if sampler is None:
+        return None
+
+    inputs = sampler.get("inputs", {})
+    if not isinstance(inputs, dict):
+        return None
+
+    # Try common seed field names across different sampler types
+    for key in ("seed", "noise_seed", "seed_num", "rand_seed"):
+        val = inputs.get(key)
+        if isinstance(val, int):
+            return val
+        if isinstance(val, str) and val.isdigit():
+            return int(val)
+
+    return None
 
 
 def _extract_prompt_text_from_workflow_node(node: Dict[str, Any]) -> str:
@@ -532,6 +575,7 @@ def _gallery_payload(node_id: str) -> Dict[str, Any]:
 
 
 def _send_gallery_update(node_id: str) -> None:
+    _save_session(node_id)
     PromptServer.instance.send_sync("workflow_gallery_update", _gallery_payload(node_id))
 
 
@@ -569,7 +613,107 @@ def _prune_entries(node_id: str, state: Dict[str, Any], max_images: int) -> None
 
 def _find_entry(entry_id: str) -> Dict[str, Any] | None:
     with STATE_LOCK:
-        return ENTRY_INDEX.get(entry_id)
+        # Fast path — normal operation
+        entry = ENTRY_INDEX.get(entry_id)
+        if entry:
+            return entry
+        # Fallback: scan all gallery states (handles session restore edge cases
+        # where ENTRY_INDEX may not have been fully rebuilt). Repairs the index
+        # on the fly so subsequent lookups are fast.
+        for state in GALLERY_STATE.values():
+            for e in state.get("entries", []):
+                if e.get("id") == entry_id:
+                    ENTRY_INDEX[entry_id] = e
+                    return e
+        return None
+
+
+def _session_path(node_id: str) -> Path:
+    safe_id = "".join(ch for ch in str(node_id) if ch.isalnum() or ch in ("-", "_"))
+    return SESSION_DIR / f"session_{safe_id}.json"
+
+
+def _save_session(node_id: str) -> None:
+    try:
+        with STATE_LOCK:
+            state = GALLERY_STATE.get(str(node_id))
+            if not state:
+                return
+            data = {
+                "node_id": str(node_id),
+                "max_images": state.get("max_images", 48),
+                "output_directory": state.get("output_directory", str(DEFAULT_SAVE_DIR)),
+                "save_to_disk": state.get("save_to_disk", False),
+                "entries": list(state.get("entries", [])),
+            }
+        path = _session_path(node_id)
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        tmp_path.replace(path)
+    except Exception as e:
+        print(f"[WorkflowGallery] Warning: could not save session for node {node_id}: {e}", flush=True)
+
+
+def _load_all_sessions() -> None:
+    if not SESSION_DIR.exists():
+        print("[WorkflowGallery] Session directory not found.", flush=True)
+        return
+
+    session_files = list(SESSION_DIR.glob("session_*.json"))
+    if not session_files:
+        return
+
+    print(f"[WorkflowGallery] Found {len(session_files)} session file(s), restoring...", flush=True)
+
+    for session_file in session_files:
+        try:
+            data = json.loads(session_file.read_text(encoding="utf-8"))
+            node_id = str(data.get("node_id", ""))
+            if not node_id:
+                continue
+
+            raw_entries: List[Dict[str, Any]] = data.get("entries", [])
+            valid_entries: List[Dict[str, Any]] = []
+            for entry in raw_entries:
+                full_path = entry.get("full_path", "")
+                thumb_path = entry.get("thumb_path", "")
+                # Use os.path.exists for reliable Windows path checking
+                if not full_path or not os.path.exists(full_path):
+                    print(f"[WorkflowGallery] Skipping {entry.get('id','?')}: full image missing at {full_path!r}", flush=True)
+                    continue
+                if not thumb_path or not os.path.exists(thumb_path):
+                    print(f"[WorkflowGallery] Skipping {entry.get('id','?')}: thumbnail missing at {thumb_path!r}", flush=True)
+                    continue
+                valid_entries.append(entry)
+
+            if not valid_entries:
+                print(f"[WorkflowGallery] No valid entries in {session_file.name}, removing.", flush=True)
+                session_file.unlink(missing_ok=True)
+                continue
+
+            with STATE_LOCK:
+                state = GALLERY_STATE.setdefault(node_id, {
+                    "entries": [],
+                    "max_images": data.get("max_images", 48),
+                    "output_directory": data.get("output_directory", str(DEFAULT_SAVE_DIR)),
+                    "save_to_disk": data.get("save_to_disk", False),
+                })
+                state["entries"] = valid_entries
+                state["max_images"] = data.get("max_images", 48)
+                state["output_directory"] = data.get("output_directory", str(DEFAULT_SAVE_DIR))
+                state["save_to_disk"] = data.get("save_to_disk", False)
+                for entry in valid_entries:
+                    ENTRY_INDEX[entry["id"]] = entry
+
+            print(f"[WorkflowGallery] Restored {len(valid_entries)} image(s) for node {node_id}", flush=True)
+
+        except Exception as e:
+            import traceback
+            print(f"[WorkflowGallery] ERROR loading {session_file.name}: {e}", flush=True)
+            traceback.print_exc()
+
+
+_load_all_sessions()
 
 
 class WorkflowGallery:
@@ -624,6 +768,7 @@ class WorkflowGallery:
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         positive_prompt, negative_prompt, prompt_source = _extract_prompts_with_fallback(prompt, extra_pnginfo, node_id)
         display_prompt = positive_prompt
+        seed = _extract_seed(prompt, node_id)
         pnginfo = _build_pnginfo(prompt, extra_pnginfo)
 
         new_entries: List[Dict[str, Any]] = []
@@ -658,6 +803,7 @@ class WorkflowGallery:
                     "prompt_source": prompt_source,
                     "positive_prompt": positive_prompt,
                     "negative_prompt": negative_prompt,
+                    "seed": seed,
                     "full_path": str(full_path),
                     "thumb_path": str(thumb_path),
                 }
@@ -702,6 +848,10 @@ async def workflow_gallery_clear(request):
                     pass
 
     _send_gallery_update(node_id)
+    try:
+        _session_path(node_id).unlink(missing_ok=True)
+    except Exception:
+        pass
     return web.json_response({"ok": True})
 
 
@@ -715,14 +865,24 @@ async def workflow_gallery_file(request):
 
     path_key = "thumb_path" if kind == "thumb" else "full_path"
     path = Path(entry[path_key])
-    if not path.exists() or path.suffix.lower() not in ALLOWED_EXTENSIONS:
+    if not path.exists():
+        print(f"[WorkflowGallery] File missing: {path}", flush=True)
         return web.Response(status=404, text="File missing")
+    if path.suffix.lower() not in ALLOWED_EXTENSIONS:
+        return web.Response(status=404, text="File type not allowed")
 
     content_type_map = {".webp": "image/webp", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
     content_type = content_type_map.get(path.suffix.lower(), "application/octet-stream")
-    response = web.FileResponse(path, headers={"Cache-Control": "no-store"})
-    response.content_type = content_type
-    return response
+    try:
+        data = path.read_bytes()
+        return web.Response(
+            body=data,
+            content_type=content_type,
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception as e:
+        print(f"[WorkflowGallery] Error reading file {path}: {e}", flush=True)
+        return web.Response(status=500, text="Error reading file")
 
 
 @routes.post("/workflow_gallery/export")

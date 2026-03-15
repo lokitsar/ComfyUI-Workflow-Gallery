@@ -448,7 +448,7 @@ function renderGallery(node, payload) {
     const isExported = entry.exported === true;
     const item = el("div", { className: `wg-item${selected ? " selected" : ""}${compareSelected ? " compare-selected" : ""}${isExported ? " exported" : ""}` });
     const badge = el("div", { className: "wg-export-badge" }, ["✓"]);
-    const img = el("img", { src: entry.thumb_url, loading: "lazy", alt: entry.filename });
+    const img = el("img", { src: entry.thumb_url, loading: "eager", alt: entry.filename });
     const promptPreview = formatPromptForDisplay(entry);
     const tooltipText = formatTooltip(entry);
     if (tooltipText) {
@@ -738,9 +738,22 @@ function attachDom(node) {
 
   node.size = [Math.max(node.size?.[0] || 0, 420), Math.max(node.size?.[1] || 0, 900)];
 
-  fetchGallery(node.id)
-    .then((payload) => renderGallery(node, payload))
-    .catch((err) => console.warn("Workflow Gallery load failed", err));
+  // Initial load with retry — handles the race condition where the browser
+  // connects before _load_all_sessions() has finished populating state on startup.
+  const loadWithRetry = async (attemptsLeft = 5, delayMs = 800) => {
+    try {
+      const payload = await fetchGallery(node.id);
+      renderGallery(node, payload);
+      // If empty and we have retries left, try again after a short delay
+      // in case the session restore is still in progress
+      if (!payload.entries?.length && attemptsLeft > 1) {
+        setTimeout(() => loadWithRetry(attemptsLeft - 1, delayMs), delayMs);
+      }
+    } catch (err) {
+      console.warn("Workflow Gallery load failed", err);
+    }
+  };
+  loadWithRetry();
 }
 
 app.registerExtension({
