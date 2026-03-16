@@ -995,7 +995,48 @@ async def workflow_gallery_clear_unexported(request):
     return web.json_response({"ok": True, "removed": len(to_remove)})
 
 
-def _load_prompt_library() -> List[Dict[str, Any]]:
+@routes.post("/workflow_gallery/delete_entries/{node_id}")
+async def workflow_gallery_delete_entries(request):
+    node_id = request.match_info["node_id"]
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "Invalid JSON"}, status=400)
+
+    entry_ids: List[str] = body.get("entry_ids", [])
+    if not entry_ids:
+        return web.json_response({"ok": False, "error": "No entry IDs"}, status=400)
+
+    to_remove: List[Dict[str, Any]] = []
+    with STATE_LOCK:
+        state = GALLERY_STATE.get(node_id)
+        if state:
+            remaining = []
+            for entry in state.get("entries", []):
+                if entry.get("id") in entry_ids:
+                    to_remove.append(entry)
+                    ENTRY_INDEX.pop(entry.get("id", ""), None)
+                else:
+                    remaining.append(entry)
+            state["entries"] = remaining
+
+    for entry in to_remove:
+        for key in ("thumb_path",):
+            path = entry.get(key)
+            if path:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except Exception:
+                    pass
+        full_path = entry.get("full_path", "")
+        if full_path and str(CACHE_BASE_DIR) in full_path:
+            try:
+                Path(full_path).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    _send_gallery_update(node_id)
+    return web.json_response({"ok": True, "removed": len(to_remove)})
     try:
         if PROMPT_LIBRARY_FILE.exists():
             return json.loads(PROMPT_LIBRARY_FILE.read_text(encoding="utf-8"))

@@ -72,6 +72,9 @@ function ensureStyles() {
     .wg-export-btn { cursor:pointer; background:rgba(60,180,80,0.15); border:1px solid rgba(60,180,80,0.5); color:rgba(100,220,120,1); border-radius:4px; padding:2px 8px; font-size:12px; }
     .wg-export-btn:hover { background:rgba(60,180,80,0.28); }
     .wg-export-btn.hidden { display:none; }
+    .wg-delete-btn { cursor:pointer; background:rgba(220,60,60,0.15); border:1px solid rgba(220,60,60,0.5); color:rgba(255,100,100,1); border-radius:4px; padding:2px 8px; font-size:12px; }
+    .wg-delete-btn:hover { background:rgba(220,60,60,0.28); }
+    .wg-delete-btn.hidden { display:none; }
     .wg-clear-unexported-btn { cursor:pointer; font-size:12px; }
     .wg-clear-unexported-btn.hidden { display:none; }
     .wg-compare-btn:hover { background:rgba(255,180,50,0.28); }
@@ -119,6 +122,16 @@ async function exportEntries(nodeId, entryIds, outputDirectory) {
 async function clearUnexported(nodeId) {
   const res = await api.fetchApi(`/workflow_gallery/clear_unexported/${nodeId}`, { method: "POST" });
   if (!res.ok) throw new Error(`Failed to clear unexported`);
+  return await res.json();
+}
+
+async function deleteEntries(nodeId, entryIds) {
+  const res = await api.fetchApi(`/workflow_gallery/delete_entries/${nodeId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entry_ids: entryIds }),
+  });
+  if (!res.ok) throw new Error(`Delete failed`);
   return await res.json();
 }
 
@@ -336,6 +349,7 @@ function closeCompareMode(node) {
   state.promptText.style.display = "";
   state.compareBtn.classList.add("hidden");
   state.exportBtn.classList.add("hidden");
+  state.deleteBtn.classList.add("hidden");
   state.clearUnexportedBtn.classList.remove("hidden");
   state.root.classList.remove("viewer-mode");
   state.preview.classList.add("hidden");
@@ -541,6 +555,15 @@ ${entry.width}×${entry.height}`]);
     item.appendChild(badge);
     item.appendChild(img);
     item.appendChild(caption);
+    // Block ComfyUI's canvas shift-click delete menu by catching mousedown early
+    item.addEventListener("mousedown", (e) => {
+      if (e.shiftKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+      }
+    }, true);
+
     item.addEventListener("click", (e) => {
       // Shift-click: unified selection for export and compare
       if (e.shiftKey) {
@@ -555,6 +578,7 @@ ${entry.width}×${entry.height}`]);
         }
         const count = state.selectedIds.length;
         state.exportBtn.classList.toggle("hidden", count < 1);
+        state.deleteBtn.classList.toggle("hidden", count < 1);
         state.compareBtn.classList.toggle("hidden", count !== 2);
         state.clearUnexportedBtn.classList.toggle("hidden", count > 0);
         renderGallery(node, state.payload || payload);
@@ -620,6 +644,7 @@ function attachDom(node) {
   const clearUnexportedBtn = el("button", { type: "button", className: "wg-clear-unexported-btn" }, ["Clear Unexported"]);
   const refreshBtn = el("button", { type: "button" }, ["Refresh"]);
   const exportBtn = el("button", { type: "button", className: "wg-export-btn hidden" }, ["↓ Export Selected"]);
+  const deleteBtn = el("button", { type: "button", className: "wg-delete-btn hidden" }, ["🗑 Delete Selected"]);
   const compareBtn = el("button", { type: "button", className: "wg-compare-btn hidden" }, ["⇔ Compare"]);
   const count = el("span", { className: "wg-count" }, ["0 / 0"]);
   const previewImg = el("img", { className: "wg-preview-img", loading: "eager", alt: "Selected image preview" });
@@ -697,7 +722,7 @@ function attachDom(node) {
   });
 
   const root = el("div", { className: "wg-root" }, [
-    el("div", { className: "wg-topbar" }, [clearBtn, clearUnexportedBtn, refreshBtn, exportBtn, compareBtn, count]),
+    el("div", { className: "wg-topbar" }, [clearBtn, clearUnexportedBtn, refreshBtn, exportBtn, deleteBtn, compareBtn, count]),
     preview,
     gallery,
     el("div", { className: "wg-slider-row" }, [el("span", {}, ["Thumbnail size"]), thumbSlider]),
@@ -705,7 +730,7 @@ function attachDom(node) {
     el("div", { className: "wg-meta", style: { fontSize: "11px", opacity: "0.8", wordBreak: "break-all", display: "grid", gap: "2px" } }, [saveMode, dir]),
   ]);
 
-  node.__wgState = { root, clearBtn, clearUnexportedBtn, refreshBtn, exportBtn, compareBtn, count, preview, previewStage, previewImg, previewCaption, promptText, promptActions, copyPromptBtn, copySeedBtn, navLeft, navRight, gallery, thumbSlider, saveMode, dir, compareWrap, compareStage, compareImgLeft, compareImgRight, compareSideLeft, compareSideRight, compareDivider, compareLabelLeft, compareLabelRight, selectedId: null, payload: null, selectedIds: [], compareIds: [], compareDividerPos: 50 };
+  node.__wgState = { root, clearBtn, clearUnexportedBtn, refreshBtn, exportBtn, deleteBtn, compareBtn, count, preview, previewStage, previewImg, previewCaption, promptText, promptActions, copyPromptBtn, copySeedBtn, navLeft, navRight, gallery, thumbSlider, saveMode, dir, compareWrap, compareStage, compareImgLeft, compareImgRight, compareSideLeft, compareSideRight, compareDivider, compareLabelLeft, compareLabelRight, selectedId: null, payload: null, selectedIds: [], compareIds: [], compareDividerPos: 50 };
 
   exportBtn.addEventListener("click", async (e) => {
     e.preventDefault();
@@ -743,6 +768,26 @@ function attachDom(node) {
     // Pass selectedIds to compare mode
     node.__wgState.compareIds = [...node.__wgState.selectedIds];
     openCompareMode(node);
+  });
+
+  deleteBtn.addEventListener("click", async (e) => {
+    e.preventDefault();
+    const state = node.__wgState;
+    if (!state.selectedIds.length) return;
+    const count = state.selectedIds.length;
+    if (!confirm(`Delete ${count} selected image${count !== 1 ? "s" : ""} from the gallery?`)) return;
+    try {
+      await deleteEntries(node.id, [...state.selectedIds]);
+      state.selectedIds = [];
+      state.exportBtn.classList.add("hidden");
+      state.deleteBtn.classList.add("hidden");
+      state.compareBtn.classList.add("hidden");
+      state.clearUnexportedBtn.classList.remove("hidden");
+      const payload = await fetchGallery(node.id);
+      renderGallery(node, payload);
+    } catch (err) {
+      console.warn("Workflow Gallery delete failed", err);
+    }
   });
 
   clearUnexportedBtn.addEventListener("click", async (e) => {
