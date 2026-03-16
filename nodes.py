@@ -39,6 +39,195 @@ PROMPT_LIBRARY_FILE = CACHE_BASE_DIR / "prompt_library.json"
 PROMPT_LIBRARY_LOCK = threading.Lock()
 PROMPT_LIBRARY_OUTPUTS: Dict[str, str] = {}
 
+# ── Wildcard expansion ────────────────────────────────────────────────────────
+import random
+import re as _re
+
+def _find_wildcard_dirs() -> List[Path]:
+    """Auto-detect wildcard directories from known locations as fallback."""
+    comfy_root = Path(folder_paths.get_output_directory()).parent
+    candidates = [
+        comfy_root / "wildcards",
+        comfy_root / "custom_nodes" / "ComfyUI-Impact-Pack" / "wildcards",
+        comfy_root / "custom_nodes" / "wildcards",
+        comfy_root / "custom_nodes" / "ComfyUI_Wildcards" / "wildcards",
+        comfy_root / "custom_nodes" / "comfyui-wildcards" / "wildcards",
+    ]
+    found = [p for p in candidates if p.exists() and p.is_dir()]
+    for p in found:
+        print(f"[PromptLibrary] Auto-detected wildcard dir: {p}", flush=True)
+    return found
+
+WILDCARD_DIRS: List[Path] = _find_wildcard_dirs()
+
+
+def _resolve_wildcard_dirs(wildcard_path: str) -> List[Path]:
+    """Resolve wildcard directories from user-specified paths (comma separated),
+    falling back to auto-detected dirs if none specified."""
+    if not wildcard_path or not wildcard_path.strip():
+        return WILDCARD_DIRS
+    dirs: List[Path] = []
+    for part in wildcard_path.split(","):
+        p = Path(part.strip())
+        if p.exists() and p.is_dir():
+            dirs.append(p)
+        else:
+            print(f"[PromptLibrary] Wildcard path not found: {p}", flush=True)
+    return dirs if dirs else WILDCARD_DIRS
+
+
+def _read_wildcard_lines_txt(path: Path) -> List[str]:
+    """Read lines from a .txt wildcard file."""
+    return [l.strip() for l in path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            if l.strip() and not l.strip().startswith("#")]
+
+
+def _read_wildcard_lines_yaml(path: Path, name_parts: List[str]) -> List[str]:
+    """Read lines from a .yaml wildcard file, optionally navigating nested keys."""
+    try:
+        import yaml  # type: ignore
+        data = yaml.safe_load(path.read_text(encoding="utf-8", errors="ignore"))
+    except ImportError:
+        # yaml not available — try basic manual parse for simple list format
+        lines = []
+        in_list = False
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                lines.append(stripped[2:].strip())
+            elif stripped.endswith(":") and not stripped.startswith("-"):
+                in_list = True
+        return lines
+    except Exception:
+        return []
+
+    # Navigate nested keys if name had path components after the filename
+    # e.g. for file "colors.yaml" with key "dark", use name_parts=["dark"]
+    for key in name_parts:
+        if isinstance(data, dict) and key in data:
+            data = data[key]
+        elif isinstance(data, dict):
+            # Try case-insensitive match
+            key_lower = key.lower()
+            match = next((v for k, v in data.items() if k.lower() == key_lower), None)
+            if match is not None:
+                data = match
+            else:
+                break
+
+    # Flatten to list of strings
+    if isinstance(data, list):
+        return [str(item).strip() for item in data if item]
+    elif isinstance(data, dict):
+        # Return all values flattened
+        lines = []
+        for v in data.values():
+            if isinstance(v, list):
+                lines.extend(str(i).strip() for i in v if i)
+            elif v:
+                lines.append(str(v).strip())
+        return lines
+    elif isinstance(data, str):
+        return [data.strip()]
+    return []
+
+
+def _find_wildcard_file_in_dirs(name: str, dirs: List[Path]):
+    """Find a wildcard file (txt or yaml) by name within given directories."""
+    name_norm = name.replace("\\", "/")
+    name_lower = name_norm.lower()
+
+    for wdir in dirs:
+        # Exact txt match
+        for ext in (".txt", ".yaml", ".yml"):
+            candidate = wdir / f"{name_norm}{ext}"
+            if candidate.exists():
+                return candidate, []
+        # Case-insensitive search across txt and yaml
+        for wfile in wdir.rglob("*"):
+            if wfile.suffix.lower() not in (".txt", ".yaml", ".yml"):
+                continue
+            rel = wfile.relative_to(wdir).with_suffix("").as_posix().lower()
+            if rel == name_lower:
+                return wfile, []
+            # Support yaml files where the wildcard name includes a key
+            # e.g. __colors/dark__ -> look for colors.yaml with key "dark"
+            parts = name_lower.split("/")
+            for i in range(len(parts), 0, -1):
+                file_part = "/".join(parts[:i])
+                key_parts = parts[i:]
+                if rel == file_part:
+                    return wfile, key_parts
+    return None, []
+
+
+def _expand_inline_choices(text: str, depth: int = 0) -> str:
+    """Expand {option1|option2|option3} inline choice syntax recursively.
+    Supports weighted options via {weight::option|weight::option} syntax.
+    Handles nested braces correctly by processing innermost first."""
+    if depth > 10 or "{" not in text:
+        return text
+
+    def replace_choice(m: _re.Match) -> str:
+        inner = m.group(1)
+        options = inner.split("|")
+        weights = []
+        cleaned = []
+        for opt in options:
+            if "::" in opt:
+                parts = opt.split("::", 1)
+                try:
+                    weights.append(float(parts[0].strip()))
+                    cleaned.append(parts[1].strip())
+                except ValueError:
+                    weights.append(1.0)
+                    cleaned.append(opt.strip())
+            else:
+                weights.append(1.0)
+                cleaned.append(opt.strip())
+        chosen = random.choices(cleaned, weights=weights, k=1)[0]
+        return chosen
+
+    # Process innermost braces first (no nested braces inside)
+    prev = None
+    result = text
+    while prev != result and depth <= 10:
+        prev = result
+        result = _re.sub(r"\{([^{}]+)\}", replace_choice, result)
+        depth += 1
+    return result
+
+
+def _expand_wildcards(text: str, dirs: List[Path], depth: int = 0) -> str:
+    """Recursively expand both __file__ wildcards and {choice|choice} inline syntax."""
+    if depth > 10:
+        return text
+
+    # Expand inline {option1|option2} choices first
+    text = _expand_inline_choices(text)
+
+    if "__" not in text:
+        return text
+
+    def replace_match(m: _re.Match) -> str:
+        wfile, key_parts = _find_wildcard_file_in_dirs(m.group(1), dirs)
+        if not wfile:
+            return m.group(0)
+        try:
+            if wfile.suffix.lower() in (".yaml", ".yml"):
+                lines = _read_wildcard_lines_yaml(wfile, key_parts)
+            else:
+                lines = _read_wildcard_lines_txt(wfile)
+            if not lines:
+                return m.group(0)
+            # Recursively expand the chosen line (may contain more wildcards or inline choices)
+            return _expand_wildcards(random.choice(lines), dirs, depth + 1)
+        except Exception as e:
+            print(f"[PromptLibrary] Wildcard error for {wfile}: {e}", flush=True)
+            return m.group(0)
+
+    return _re.sub(r"__([a-zA-Z0-9_\-/\\]+)__", replace_match, text)
+
 
 def _safe_int(value: Any, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
     try:
@@ -1037,6 +1226,9 @@ async def workflow_gallery_delete_entries(request):
 
     _send_gallery_update(node_id)
     return web.json_response({"ok": True, "removed": len(to_remove)})
+
+
+def _load_prompt_library() -> List[Dict[str, Any]]:
     try:
         if PROMPT_LIBRARY_FILE.exists():
             return json.loads(PROMPT_LIBRARY_FILE.read_text(encoding="utf-8"))
@@ -1066,17 +1258,24 @@ class PromptLibrary:
         return {
             "required": {
                 "selected_prompt_id": ("STRING", {"default": "", "multiline": False}),
+                "expand_wildcards": ("BOOLEAN", {"default": False}),
+                "wildcard_path": ("STRING", {"default": "", "multiline": False, "placeholder": "Path to wildcards folder (comma separated for multiple)"}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
             },
         }
 
-    def get_prompt(self, selected_prompt_id: str = "", unique_id: str | None = None):
+    def get_prompt(self, selected_prompt_id: str = "", expand_wildcards: bool = False, wildcard_path: str = "", unique_id: str | None = None):
         node_id = str(unique_id or "")
+        output = selected_prompt_id
+        if expand_wildcards and output:
+            dirs = _resolve_wildcard_dirs(wildcard_path)
+            output = _expand_wildcards(output, dirs)
+            print(f"[PromptLibrary] Wildcard expanded: {output[:100]!r}", flush=True)
         if node_id:
-            PROMPT_LIBRARY_OUTPUTS[node_id] = selected_prompt_id
-        return (selected_prompt_id,)
+            PROMPT_LIBRARY_OUTPUTS[node_id] = output
+        return (output,)
 
 
 @routes.get("/prompt_library/list")
