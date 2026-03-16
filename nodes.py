@@ -37,6 +37,7 @@ SESSION_DIR.mkdir(parents=True, exist_ok=True)
 
 PROMPT_LIBRARY_FILE = CACHE_BASE_DIR / "prompt_library.json"
 PROMPT_LIBRARY_LOCK = threading.Lock()
+PROMPT_LIBRARY_OUTPUTS: Dict[str, str] = {}
 
 
 def _safe_int(value: Any, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
@@ -227,9 +228,12 @@ def _resolve_text_from_ref(prompt_graph: Dict[str, Any], value: Any, visited: se
     if "ZeroOut" in class_type or "zero_out" in class_type.lower():
         return ""
 
-    # PromptLibrary node — the selected_prompt_id widget stores the full
-    # built output string directly (set by the JS UI).
+    # PromptLibrary node — use runtime output dict first, fall back to widget value
     if class_type == "PromptLibrary":
+        if node_ref in PROMPT_LIBRARY_OUTPUTS:
+            val = PROMPT_LIBRARY_OUTPUTS[node_ref]
+            if val and val.strip():
+                return val.strip()
         val = inputs.get("selected_prompt_id", "")
         if isinstance(val, str) and val.strip():
             return val.strip()
@@ -732,7 +736,7 @@ class WorkflowGallery:
     RETURN_TYPES = ("IMAGE",)
     RETURN_NAMES = ("images",)
     FUNCTION = "collect"
-    OUTPUT_NODE = False
+    OUTPUT_NODE = True
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -773,7 +777,7 @@ class WorkflowGallery:
 
         if not enabled:
             _send_gallery_update(node_id)
-            return (images,)
+            return {"ui": {"images": []}, "result": (images,)}
 
         safe_prefix = _sanitize_prefix(filename_prefix)
         timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -827,7 +831,7 @@ class WorkflowGallery:
             _prune_entries(node_id, state, max_images)
 
         _send_gallery_update(node_id)
-        return (images,)
+        return {"ui": {"images": []}, "result": (images,)}
 
 
 routes = PromptServer.instance.routes
@@ -1020,13 +1024,17 @@ class PromptLibrary:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                # This widget stores the full built prompt string set by the JS UI
                 "selected_prompt_id": ("STRING", {"default": "", "multiline": False}),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
             },
         }
 
-    def get_prompt(self, selected_prompt_id: str = ""):
-        # The JS stores the full built output (selected + manual) directly in this widget
+    def get_prompt(self, selected_prompt_id: str = "", unique_id: str | None = None):
+        node_id = str(unique_id or "")
+        if node_id:
+            PROMPT_LIBRARY_OUTPUTS[node_id] = selected_prompt_id
         return (selected_prompt_id,)
 
 
