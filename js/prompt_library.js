@@ -24,13 +24,13 @@ function ensurePlStyles() {
   const style = document.createElement("style");
   style.id = "prompt-library-styles";
   style.textContent = `
-    .pl-root { display:flex; flex-direction:column; gap:6px; padding:8px; box-sizing:border-box; width:100%; height:100%; overflow:hidden; min-height:0; }
+    .pl-root { display:flex; flex-direction:column; gap:6px; padding:8px; box-sizing:border-box; width:100%; height:100%; overflow-y:auto; min-height:0; }
     .pl-topbar { display:flex; gap:6px; align-items:center; flex-wrap:wrap; flex-shrink:0; }
     .pl-topbar button { cursor:pointer; }
     .pl-search-row { display:flex; gap:6px; flex-shrink:0; }
     .pl-search { flex:1; padding:4px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; font-size:12px; }
     .pl-tag-filter { padding:4px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:rgba(0,0,0,0.3); color:inherit; font-size:12px; min-width:80px; }
-    .pl-list { flex:1 1 auto; min-height:120px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; }
+    .pl-list { flex:0 0 auto; min-height:120px; overflow-y:visible; display:flex; flex-direction:column; gap:4px; }
     .pl-item { border:1px solid rgba(255,255,255,0.12); border-radius:8px; padding:8px; background:rgba(0,0,0,0.2); cursor:pointer; transition:background 0.1s; }
     .pl-item:hover { background:rgba(255,255,255,0.08); }
     .pl-item.selected { outline:2px solid rgba(120,180,255,0.9); background:rgba(120,180,255,0.08); }
@@ -417,24 +417,6 @@ function attachPlDom(node) {
   node.size = [Math.max(node.size?.[0] || 0, 420), Math.max(node.size?.[1] || 0, 700)];
 
   // Set list height based on node canvas size — same approach as compare stage
-  const setListHeight = () => {
-    const totalH = node.size?.[1] || 700;
-    const fixedH = 280; // topbar + search + forms + selected bar + manual textarea
-    const listH = Math.max(120, totalH - fixedH);
-    list.style.height = `${listH}px`;
-    list.style.maxHeight = `${listH}px`;
-    list.style.overflowY = "auto";
-    list.style.flex = "none";
-  };
-  setListHeight();
-
-  // Update on node resize
-  const origOnResize = node.onResize;
-  node.onResize = function(size) {
-    setListHeight();
-    return origOnResize?.apply(this, arguments);
-  };
-
   // Initial load
   loadEntries();
 

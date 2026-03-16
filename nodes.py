@@ -161,10 +161,9 @@ def _find_wildcard_file_in_dirs(name: str, dirs: List[Path]):
     return None, []
 
 
-def _expand_inline_choices(text: str, depth: int = 0) -> str:
+def _expand_inline_choices(text: str, rng: random.Random, depth: int = 0) -> str:
     """Expand {option1|option2|option3} inline choice syntax recursively.
-    Supports weighted options via {weight::option|weight::option} syntax.
-    Handles nested braces correctly by processing innermost first."""
+    Supports weighted options via {weight::option|weight::option} syntax."""
     if depth > 10 or "{" not in text:
         return text
 
@@ -185,10 +184,8 @@ def _expand_inline_choices(text: str, depth: int = 0) -> str:
             else:
                 weights.append(1.0)
                 cleaned.append(opt.strip())
-        chosen = random.choices(cleaned, weights=weights, k=1)[0]
-        return chosen
+        return rng.choices(cleaned, weights=weights, k=1)[0]
 
-    # Process innermost braces first (no nested braces inside)
     prev = None
     result = text
     while prev != result and depth <= 10:
@@ -198,13 +195,16 @@ def _expand_inline_choices(text: str, depth: int = 0) -> str:
     return result
 
 
-def _expand_wildcards(text: str, dirs: List[Path], depth: int = 0) -> str:
+def _expand_wildcards(text: str, dirs: List[Path], rng: random.Random | None = None, depth: int = 0) -> str:
     """Recursively expand both __file__ wildcards and {choice|choice} inline syntax."""
     if depth > 10:
         return text
 
+    if rng is None:
+        rng = random.Random()
+
     # Expand inline {option1|option2} choices first
-    text = _expand_inline_choices(text)
+    text = _expand_inline_choices(text, rng)
 
     if "__" not in text:
         return text
@@ -220,8 +220,7 @@ def _expand_wildcards(text: str, dirs: List[Path], depth: int = 0) -> str:
                 lines = _read_wildcard_lines_txt(wfile)
             if not lines:
                 return m.group(0)
-            # Recursively expand the chosen line (may contain more wildcards or inline choices)
-            return _expand_wildcards(random.choice(lines), dirs, depth + 1)
+            return _expand_wildcards(rng.choice(lines), dirs, rng, depth + 1)
         except Exception as e:
             print(f"[PromptLibrary] Wildcard error for {wfile}: {e}", flush=True)
             return m.group(0)
@@ -1260,19 +1259,22 @@ class PromptLibrary:
                 "selected_prompt_id": ("STRING", {"default": "", "multiline": False}),
                 "expand_wildcards": ("BOOLEAN", {"default": False}),
                 "wildcard_path": ("STRING", {"default": "", "multiline": False, "placeholder": "Path to wildcards folder (comma separated for multiple)"}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
             },
         }
 
-    def get_prompt(self, selected_prompt_id: str = "", expand_wildcards: bool = False, wildcard_path: str = "", unique_id: str | None = None):
+    def get_prompt(self, selected_prompt_id: str = "", expand_wildcards: bool = False, wildcard_path: str = "", seed: int = 0, unique_id: str | None = None):
         node_id = str(unique_id or "")
         output = selected_prompt_id
         if expand_wildcards and output:
             dirs = _resolve_wildcard_dirs(wildcard_path)
-            output = _expand_wildcards(output, dirs)
-            print(f"[PromptLibrary] Wildcard expanded: {output[:100]!r}", flush=True)
+            # Seed random so each generation picks differently but is reproducible
+            rng = random.Random(seed)
+            output = _expand_wildcards(output, dirs, rng=rng)
+            print(f"[PromptLibrary] Wildcard expanded (seed={seed}): {output[:100]!r}", flush=True)
         if node_id:
             PROMPT_LIBRARY_OUTPUTS[node_id] = output
         return (output,)
