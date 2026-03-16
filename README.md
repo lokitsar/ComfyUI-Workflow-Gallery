@@ -4,7 +4,7 @@ A suite of ComfyUI custom nodes for reviewing, comparing, exporting, and reusing
 
 ## Version
 
-Current release: **v0.1.19**
+Current release: **v0.1.20**
 
 ## Why I made this
 
